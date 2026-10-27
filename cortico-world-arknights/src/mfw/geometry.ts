@@ -18,6 +18,18 @@ export function toPixel(normalized: number, size: number): number {
   return Math.min(last, Math.max(0, Math.round(clamp01(normalized) * last)));
 }
 
+/** 16:9 的宽高比；暂停键默认值就是按这个比例标定的。 */
+export const ASPECT_16_9 = 16 / 9;
+
+/**
+ * 判断画面是否接近 16:9。容差 0.02 足够把 1280×720（1.778）与 1152×720（1.600）分开，
+ * 又不会因为一两个像素的取整误差误报。
+ */
+export function is16by9(width: number, height: number, tolerance = 0.02): boolean {
+  if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) return false;
+  return Math.abs(width / height - ASPECT_16_9) <= tolerance;
+}
+
 /** 一次点击的落点。 */
 export function toPoint(
   norm: { readonly x: number; readonly y: number },

@@ -26,7 +26,7 @@ function pngHeader(width: number, height: number): Uint8Array {
   return bytes;
 }
 
-let imageBytes = pngHeader(1000, 400);
+let imageBytes = pngHeader(1280, 720);
 
 function jobOf(succeeded: boolean, status = succeeded ? 1 : 0): MaaJobLike {
   const job: MaaJobLike = { succeeded, status, wait: async () => job };
@@ -45,7 +45,7 @@ class FakeController implements MaaControllerLike {
   connected = false;
 
   get resolution(): [number, number] | null {
-    return FakeController.noResolution ? null : [1000, 400];
+    return FakeController.noResolution ? null : [1280, 720];
   }
 
   constructor(
@@ -85,7 +85,7 @@ class FakeController implements MaaControllerLike {
 const fakeMaa: MaaModule = {
   Win32Controller: FakeController as unknown as MaaModule['Win32Controller'],
   Win32ScreencapMethod: { Background: '18', FramePool: '2', PrintWindow: '8' },
-  Win32InputMethod: { SendMessage: '1', PostMessage: '2' },
+  Win32InputMethod: { SendMessage: '1', PostMessage: '2', AnchoredTouch: '32' },
 };
 
 let scratchDir: string;
@@ -100,7 +100,7 @@ beforeEach(() => {
   FakeController.created = [];
   FakeController.noResolution = false;
   FakeController.emptyImage = false;
-  imageBytes = pngHeader(1000, 400);
+  imageBytes = pngHeader(1280, 720);
 });
 
 afterEach(() => rmSync(scratchDir, { recursive: true, force: true }));
@@ -214,9 +214,11 @@ describe('明日方舟 World', () => {
     const outcome = receipt(await toolOf(world, 'ark_connect').handler({}, call));
     expect(outcome.failed).toBeUndefined();
     expect(outcome.text).toContain('明日方舟');
-    expect(outcome.text).toContain('1000×400');
+    expect(outcome.text).toContain('1280×720');
     expect(FakeController.created[0]?.screencapMethod).toBe('18');
-    expect(FakeController.created[0]?.mouseMethod).toBe('1');
+    // 默认输入方式是 AnchoredTouch，实测能点中右上角小按钮
+    expect(FakeController.created[0]?.mouseMethod).toBe('32');
+    expect(FakeController.created[0]?.keyboardMethod).toBe('32');
   });
 
   it('截图回执带 PNG 附件与必填的 fallbackText', async () => {
@@ -229,19 +231,54 @@ describe('明日方舟 World', () => {
     if (!('bytes' in blob)) throw new Error('应当是新字节形式的附件');
     expect(blob.mime).toBe('image/png');
     expect(blob.bytes.byteLength).toBe(imageBytes.byteLength);
-    expect(blob.fallbackText).toContain('1000×400');
+    expect(blob.fallbackText).toContain('1280×720');
     expect(blob.name).toMatch(/^arknights-\d{8}-\d{6}\.png$/);
   });
 
-  it('暂停按归一化坐标换算成像素后点击，并如实说明无法确认状态', async () => {
+  it('暂停按归一化坐标换算成像素后点击，并如实说明不下结论', async () => {
     const { ctx, world } = newWorld();
     Object.assign(ctx.cfg, { pauseButton: { x: 0.5, y: 0.25 } });
     await toolOf(world, 'ark_connect').handler({}, call);
     const outcome = receipt(await toolOf(world, 'ark_set_paused').handler({ paused: true }, call));
     expect(outcome.failed).toBeUndefined();
-    expect(FakeController.clicks).toEqual([[500, 100]]);
-    expect(outcome.text).toContain('已向 (500, 100) 发送一次点击');
-    expect(outcome.text).toContain('无法确认');
+    // 还没抓过帧，只能按控制器报的 1280×720 换算：(0.5×1279, 0.25×719)
+    expect(FakeController.clicks).toEqual([[640, 180]]);
+    expect(outcome.text).toContain('已向 (640, 180) 发送一次点击');
+    expect(outcome.text).toContain('不做识别');
+    expect(outcome.text).not.toContain('已暂停');
+  });
+
+  it('默认开启补拍：点击后回执附带一张点击后的画面', async () => {
+    const { world } = newWorld();
+    await toolOf(world, 'ark_connect').handler({}, call);
+    const outcome = receipt(await toolOf(world, 'ark_set_paused').handler({ paused: true }, call));
+    expect(outcome.blobs).toHaveLength(1);
+    const blob = outcome.blobs![0]!;
+    if (!('bytes' in blob)) throw new Error('应当是新字节形式的附件');
+    expect(blob.mime).toBe('image/png');
+    expect(blob.bytes.byteLength).toBe(imageBytes.byteLength);
+    expect(blob.fallbackText).toContain('点击后');
+    expect(outcome.text).toContain('附件是点击之后抓的一帧');
+  });
+
+  it('关掉 verifyAfterClick 时退回纯文字回执，不产生附件', async () => {
+    const { ctx, world } = newWorld();
+    Object.assign(ctx.cfg, { verifyAfterClick: false });
+    await toolOf(world, 'ark_connect').handler({}, call);
+    const outcome = receipt(await toolOf(world, 'ark_set_paused').handler({ paused: false }, call));
+    expect(outcome.blobs).toBeUndefined();
+    expect(outcome.text).toContain('ark_screencap');
+  });
+
+  it('补拍失败不影响点击结论，只在回执里说明', async () => {
+    const { world } = newWorld();
+    await toolOf(world, 'ark_connect').handler({}, call);
+    FakeController.emptyImage = true;
+    const outcome = receipt(await toolOf(world, 'ark_set_paused').handler({ paused: true }, call));
+    expect(outcome.failed).toBeUndefined();
+    expect(outcome.blobs).toBeUndefined();
+    expect(outcome.text).toContain('补拍点击后的画面失败');
+    expect(FakeController.clicks).toHaveLength(1);
   });
 
   it('坐标热改后下一次点击立即按新值换算', async () => {
@@ -249,7 +286,7 @@ describe('明日方舟 World', () => {
     await toolOf(world, 'ark_connect').handler({}, call);
     ctx.persist({ pauseButton: { x: 0, y: 1 } });
     await toolOf(world, 'ark_set_paused').handler({ paused: false }, call);
-    expect(FakeController.clicks).toEqual([[0, 399]]);
+    expect(FakeController.clicks).toEqual([[0, 719]]);
   });
 
   it('帧尺寸与控制器尺寸不一致时按帧尺寸换算，且只提醒一次', async () => {
@@ -258,13 +295,14 @@ describe('明日方舟 World', () => {
     Object.assign(ctx.cfg, { pauseButton: { x: 0.5, y: 0.5 } });
     await toolOf(world, 'ark_connect').handler({}, call);
 
-    // 没有帧时只能信控制器报的 1000×400
+    // 没有帧时只能信控制器报的 1280×720
     await toolOf(world, 'ark_set_paused').handler({ paused: true }, call);
-    expect(FakeController.clicks.at(-1)).toEqual([500, 200]);
+    expect(FakeController.clicks.at(-1)).toEqual([640, 360]);
 
     await toolOf(world, 'ark_screencap').handler({}, call);
-    expect(warns).toHaveLength(1);
-    expect(warns[0]).toContain('800×500');
+    const sizeWarns = warns.filter((line) => line.includes('控制器报告的尺寸'));
+    expect(sizeWarns).toHaveLength(1);
+    expect(sizeWarns[0]).toContain('800×500');
 
     // 抓过帧以后一律按帧的 800×500 换算
     await toolOf(world, 'ark_set_paused').handler({ paused: false }, call);
@@ -272,7 +310,27 @@ describe('明日方舟 World', () => {
 
     // 再抓一帧不重复刷日志
     await toolOf(world, 'ark_screencap').handler({}, call);
-    expect(warns).toHaveLength(1);
+    expect(warns.filter((line) => line.includes('控制器报告的尺寸'))).toHaveLength(1);
+  });
+
+  it('画面不是 16:9 时提示暂停坐标可能失准，只提醒一次', async () => {
+    imageBytes = pngHeader(1152, 720);
+    const { world, warns } = newWorld();
+    await toolOf(world, 'ark_connect').handler({}, call);
+    await toolOf(world, 'ark_screencap').handler({}, call);
+    const aspectWarns = warns.filter((line) => line.includes('不是 16:9'));
+    expect(aspectWarns).toHaveLength(1);
+    expect(aspectWarns[0]).toContain('1152×720');
+
+    await toolOf(world, 'ark_screencap').handler({}, call);
+    expect(warns.filter((line) => line.includes('不是 16:9'))).toHaveLength(1);
+  });
+
+  it('16:9 画面不产生比例告警', async () => {
+    const { world, warns } = newWorld();
+    await toolOf(world, 'ark_connect').handler({}, call);
+    await toolOf(world, 'ark_screencap').handler({}, call);
+    expect(warns.filter((line) => line.includes('不是 16:9'))).toHaveLength(0);
   });
 
   it('参数不是布尔值时拒绝执行，也不发点击', async () => {
@@ -323,6 +381,6 @@ describe('明日方舟 World', () => {
     FakeController.emptyImage = false;
     const again = receipt(await toolOf(world, 'ark_connect').handler({}, call));
     expect(again.failed).toBeUndefined();
-    expect(again.text).toContain('1000×400');
+    expect(again.text).toContain('1280×720');
   });
 });

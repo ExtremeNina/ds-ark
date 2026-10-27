@@ -54,7 +54,8 @@ export const ARKNIGHTS_TOOL_DECLS: ReadonlyArray<ToolSpec> = [
     name: 'ark_set_paused',
     description:
       'Click the configured pause button position once to pause (true) or resume (false) the battle. '
-      + 'The receipt only states that a click was sent; it cannot confirm the game state.',
+      + 'When verifyAfterClick is on, the receipt also carries a frame captured right after the click, '
+      + 'so you can judge the result yourself; the World still does not confirm the game state.',
     tags: ['act'],
     parameters: {
       type: 'object',
@@ -183,8 +184,32 @@ export class ArknightsWorld implements World {
     const clicked = await this.session.click(x, y);
     if (!clicked.ok) return fail(clicked.error);
     const action = paused ? '暂停' : '继续';
-    return `已向 (${x}, ${y}) 发送一次点击（按 ${width}×${height} 的 ${(cfg.pauseButton.x * 100).toFixed(1)}% / `
-      + `${(cfg.pauseButton.y * 100).toFixed(1)}% 换算），意图是${action}。`
-      + `这是点击回执，无法确认游戏是否真的${action}；需要确认请再调用 ark_screencap 自己看。`;
+    const receipt = `已向 (${x}, ${y}) 发送一次点击（按 ${width}×${height} 的 ${(cfg.pauseButton.x * 100).toFixed(1)}% / `
+      + `${(cfg.pauseButton.y * 100).toFixed(1)}% 换算），意图是${action}。`;
+
+    if (!cfg.verifyAfterClick) {
+      return `${receipt}这是点击回执，无法确认游戏是否真的${action}；需要确认请再调用 ark_screencap 自己看。`;
+    }
+
+    // 补拍一帧：让模型直接用眼睛判断，而不是相信坐标或回执文字。
+    const after = await this.session.screencap();
+    if (!after.ok) {
+      return `${receipt}补拍点击后的画面失败（${after.error}），因此无法提供对照，请自行确认游戏状态。`;
+    }
+    const at = new Date();
+    // 补拍会把帧尺寸刷新到最新值；附件说明用刷新后的尺寸，避免和画面本身对不上。
+    const afterSize = this.session.resolution ?? [width, height];
+    return {
+      text: `${receipt}附件是点击之后抓的一帧，请据此判断是否真的${action}；World 自己不做识别，也不会替你下结论。`,
+      blobs: [
+        {
+          bytes: after.png,
+          mime: SCREENSHOT_MIME,
+          name: screenshotName(at),
+          fallbackText: `${action}点击后的一帧，${afterSize[0]}×${afterSize[1]}，PNG ${after.png.byteLength} 字节`
+            + '（端点不接受图片时只发送这句，请再调用 ark_screencap 确认）。',
+        },
+      ],
+    };
   }
 }

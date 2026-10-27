@@ -36,7 +36,7 @@
     },
     {
       "name": "ark_set_paused",
-      "description": "Click the configured pause button position once to pause (true) or resume (false) the battle. The receipt only states that a click was sent; it cannot confirm the game state.",
+      "description": "Click the configured pause button position once to pause (true) or resume (false) the battle. When verifyAfterClick is on, the receipt also carries a frame captured right after the click, so you can judge the result yourself; the World still does not confirm the game state.",
       "parameters": {
         "type": "object",
         "additionalProperties": false,
@@ -73,7 +73,7 @@
       "key": "worlds.arknights.envPrompt",
       "title": "明日方舟 · 环境提示词",
       "role": "envPrompt",
-      "content": "明日方舟 PC 客户端是本机一个可以被截屏、被点击的窗口（当前匹配关键字：{{arknights.windowMatch}}）。使用时机与约束：\n\n- 任何操作前先调用一次 ark_connect。它没成功时先确认游戏是否已经启动、窗口标题是否与上面的关键字相符，再决定是否让用户改配置；不要连续重试同一个调用。\n- 需要看画面时才调用 ark_screencap。每次只取当前一帧，不要连拍轮询：连续截图既不会得到更新的战场信息，也会白白占掉上下文。\n- 要让游戏停住或继续时调用 ark_set_paused，传 true 停、传 false 继续。它只保证「向配置的那个坐标发了一次点击」，无法确认游戏是否真的暂停；需要确认就再截一帧自己看。\n- 点击可能被游戏直接忽略（后台合成消息、权限不对等都会这样）。用户说「没反应」时，先重新截一帧确认当前状态，不要连续重复调用 ark_set_paused；确认没生效就如实说明可能的原因（坐标没校准、输入方式不适用、游戏与桌宠权限不一致），把处理交给用户。\n- 本版没有识别能力：读不出费用、手牌、生命值、关卡名和干员位置。不要向用户报告这些数值，用户问起战况时如实说这一版看不到，也不要凭画面里的文字猜。\n- 只操作明日方舟窗口。用户想换分辨率时不必重新校准，坐标按比例缩放，改配置里的两个比例值即可。\n"
+      "content": "明日方舟 PC 客户端是本机一个可以被截屏、被点击的窗口（当前匹配关键字：{{arknights.windowMatch}}）。使用时机与约束：\n\n- 任何操作前先调用一次 ark_connect。它没成功时先确认游戏是否已经启动、窗口标题是否与上面的关键字相符，再决定是否让用户改配置；不要连续重试同一个调用。\n- 需要看画面时才调用 ark_screencap。每次只取当前一帧，不要连拍轮询：连续截图既不会得到更新的战场信息，也会白白占掉上下文。\n- 要让游戏停住或继续时调用 ark_set_paused，传 true 停、传 false 继续。回执会附上点击之后抓的一帧，用那张图自己判断有没有真的暂停或继续；World 不做识别，也不替你下结论。没有附带图片时（端点不接受图片或补拍失败），再调用一次 ark_screencap 确认。\n- 点击可能被游戏直接忽略（后台合成消息、权限不对等都会这样）。用户说「没反应」时，先重新截一帧确认当前状态，不要连续重复调用 ark_set_paused；确认没生效就如实说明可能的原因（坐标没校准、输入方式不适用、游戏与桌宠权限不一致），把处理交给用户。\n- 本版没有识别能力：读不出费用、手牌、生命值、关卡名和干员位置。不要向用户报告这些数值，用户问起战况时如实说这一版看不到，也不要凭画面里的文字猜。\n- 只操作明日方舟窗口。画面仍是 16:9 时换分辨率不必重新校准，坐标会按比例缩放；换成 16:10、21:9 等比例后暂停坐标不再保证，需要用户按 README 的步骤重新标定 pauseButton（日志里会提示一次「不是 16:9」）。\n"
     }
   ]
 }

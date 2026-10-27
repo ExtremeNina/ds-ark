@@ -44,6 +44,8 @@ export interface ArknightsConfigSection {
   inputMethod: (typeof INPUT_METHODS)[number];
   /** 暂停按钮位置，按 0~1 相对坐标存，换分辨率不用重新校准。 */
   pauseButton: { x: number; y: number };
+  /** 暂停/恢复点击后是否补拍一帧作为附件，让模型自己看结果。 */
+  verifyAfterClick: boolean;
   /** 预留给后续 OCR 的 MaaFramework 资源目录；本版不加载 Resource/Tasker。 */
   resourceDir: string;
 }
@@ -52,8 +54,12 @@ export const ARKNIGHTS_DEFAULTS: ArknightsConfigSection = {
   enabled: false,
   windowMatch: DEFAULT_WINDOW_KEYWORDS.join(','),
   screencapMethod: 'Default',
-  inputMethod: 'SendMessage',
-  pauseButton: { x: 0.97, y: 0.06 },
+  // 实测（1280×720 帧，游戏窗口 1920×1080）：SendMessage 能点亮底部干员卡，
+  // 却点不中右上角的暂停键与 1X 倍速键；AnchoredTouch 注入 WM_POINTER，两者都能点中且不抢前台。
+  inputMethod: 'AnchoredTouch',
+  // 实测暂停键中心（帧坐标 1236, 51）按 (size-1) 归一化；16:9 下任意分辨率落点一致。
+  pauseButton: { x: 0.966, y: 0.071 },
+  verifyAfterClick: true,
   resourceDir: '',
 };
 
@@ -82,7 +88,9 @@ export const ARKNIGHTS_CONFIG_GROUP: ConfigGroup = {
       'worlds.arknights.inputMethod': {
         type: 'string',
         title: '输入方式',
-        description: 'SendMessage / PostMessage 系不移动真实光标；若游戏对点击无反应，改这一项。',
+        description:
+          '默认 AnchoredTouch：实测能命中右上角的小按钮，且不会把游戏抢到前台。'
+          + 'SendMessage / PostMessage 更「静默」，但在本客户端点不中右上角按钮。',
         enum: [...INPUT_METHODS],
         'x-hot': true,
       },
@@ -97,9 +105,17 @@ export const ARKNIGHTS_CONFIG_GROUP: ConfigGroup = {
       'worlds.arknights.pauseButton.y': {
         type: 'number',
         title: '暂停按钮 · 纵向位置',
-        description: '按画面高度的比例填 0~1，0 是最上、1 是最下。',
+        description: '按画面高度的比例填 0~1，0 是最上、1 是最下。默认值按 16:9 标定，换宽高比要重标。',
         minimum: 0,
         maximum: 1,
+        'x-hot': true,
+      },
+      'worlds.arknights.verifyAfterClick': {
+        type: 'boolean',
+        title: '点击后补拍一帧',
+        description:
+          '开启后每次暂停/恢复都会多抓一帧作为附件，让模型自己看有没有生效；'
+          + '代价是多一次截图和一张图的 token。',
         'x-hot': true,
       },
       'worlds.arknights.resourceDir': {

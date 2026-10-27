@@ -10,6 +10,7 @@ import {
   type MaaJobLike,
   type MaaLoadResult,
 } from './native.ts';
+import { is16by9 } from './geometry.ts';
 import { pickWindow, parseKeywords, describeDevices, type WindowInfo } from './window.ts';
 import { pngSize, toPngBytes } from './screen.ts';
 import { errorText, withTimeout } from './timeout.ts';
@@ -21,7 +22,8 @@ const CLICK_TIMEOUT_MS = 5_000;
 
 /** 截图方式与输入方式都缺省时的兜底组合：后台可采（FramePool/PrintWindow）+ 后台可点。 */
 const FALLBACK_SCREENCAP = 'Background';
-const FALLBACK_INPUT = 'SendMessage';
+// 实测：SendMessage 点不中右上角的小按钮，AnchoredTouch 可以且不抢前台。
+const FALLBACK_INPUT = 'AnchoredTouch';
 
 export type ConnectResult =
   | { ok: true; window: WindowInfo; resolution: readonly [number, number] }
@@ -59,6 +61,7 @@ export class ArknightsSession {
   /** 最近一帧的真实像素尺寸；点击换算以它为准。 */
   private frame: { width: number; height: number } | null = null;
   private warnedSizeMismatch = false;
+  private warnedAspect = false;
 
   constructor(
     private readonly load: () => Promise<MaaLoadResult> = loadMaa,
@@ -214,17 +217,33 @@ export class ArknightsSession {
     return { ok: true, png };
   }
 
-  /** 记录本帧真实尺寸；与控制器报的尺寸不一致时只提醒一次，避免每帧刷日志。 */
+  /** 记录本帧真实尺寸，并做两项一次性自检：尺寸来源是否一致、比例是否仍与标定基准相同。 */
   private recordFrame(png: Uint8Array): void {
     const size = pngSize(png);
     if (!size) return;
     this.frame = size;
+    this.checkSizeMismatch(size);
+    this.checkAspect(size);
+  }
+
+  private checkSizeMismatch(size: { width: number; height: number }): void {
     const reported = this.readResolution();
     if (this.warnedSizeMismatch || !reported) return;
     if (reported[0] === size.width && reported[1] === size.height) return;
     this.warnedSizeMismatch = true;
     this.warn(
       `控制器报告的尺寸 ${reported[0]}×${reported[1]} 与实际画面 ${size.width}×${size.height} 不一致，点击换算改用实际画面尺寸。`,
+    );
+  }
+
+  /** 暂停坐标是按 16:9 标定的；比例一变，按钮的相对位置就不再可信。 */
+  private checkAspect(size: { width: number; height: number }): void {
+    if (this.warnedAspect) return;
+    if (is16by9(size.width, size.height)) return;
+    this.warnedAspect = true;
+    this.warn(
+      `当前画面 ${size.width}×${size.height} 不是 16:9，而暂停坐标是按 16:9 标定的，ark_set_paused 可能点偏。`
+        + '请把窗口改回 16:9 后重启对话，或按 README 的步骤重新标定 pauseButton。',
     );
   }
 
@@ -248,6 +267,7 @@ export class ArknightsSession {
     this.win = null;
     this.frame = null;
     this.warnedSizeMismatch = false;
+    this.warnedAspect = false;
   }
 
   private readResolution(): readonly [number, number] | null {
