@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { clamp01, is16by9, pausePoint, toPixel, toPoint } from '../src/mfw/geometry.ts';
+import { aspectDeviation, clamp01, is16by9, pausePoint, toPixel, toPoint } from '../src/mfw/geometry.ts';
 
 describe('画面比例判定', () => {
   it('16:9 的各种分辨率都算命中', () => {
@@ -28,6 +28,14 @@ describe('画面比例判定', () => {
     expect(is16by9(1294, 720)).toBe(true);
     expect(is16by9(1265, 720)).toBe(false);
     expect(is16by9(1295, 720)).toBe(false);
+  });
+
+  it('偏差值：16:9 为 0，1.71:1 约 0.065，16:10 约 0.178', () => {
+    expect(aspectDeviation(1280, 720)).toBeCloseTo(0, 10);
+    expect(aspectDeviation(1233, 720)).toBeCloseTo(0.0653, 3);
+    expect(aspectDeviation(1152, 720)).toBeCloseTo(0.1778, 3);
+    expect(aspectDeviation(0, 720)).toBe(Number.POSITIVE_INFINITY);
+    expect(aspectDeviation(Number.NaN, 720)).toBe(Number.POSITIVE_INFINITY);
   });
 });
 

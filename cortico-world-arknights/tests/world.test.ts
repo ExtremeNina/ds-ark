@@ -210,15 +210,16 @@ function writeFakeModel(dir: string): void {
 
 function newWorld(maa: MaaModule = fakeMaa, warns: string[] = []) {
   const ctx = fakeWorldContext(ARKNIGHTS, { scratchDir });
+  const infos: string[] = [];
   const session = new ArknightsSession(
     async () => ({ ok: true, maa }),
     (line) => warns.push(line),
-    () => {},
+    (line) => infos.push(line),
     // 每个用例的内置模型目录都是自己的临时目录：想要「有模型」就自己写三件套。
     scratchDir,
   );
   const world = new ArknightsWorld({ cfg: ctx.cfg, timezone: ctx.timezone, session });
-  return { ctx, world, session, warns };
+  return { ctx, world, session, warns, infos };
 }
 
 function toolOf(world: ArknightsWorld, name: string) {
@@ -435,11 +436,30 @@ describe('明日方舟 World', () => {
     expect(warns.filter((line) => line.includes('不是 16:9'))).toHaveLength(1);
   });
 
-  it('16:9 画面不产生比例告警', async () => {
-    const { world, warns } = newWorld();
+  it('轻微非 16:9 只发 info：x 已按右边缘余量换算，不要求改窗口', async () => {
+    imageBytes = pngHeader(1233, 720);
+    const { world, warns, infos } = newWorld();
+    await toolOf(world, 'ark_connect').handler({}, call);
+    await toolOf(world, 'ark_screencap').handler({}, call);
+
+    const notices = infos.filter((line) => line.includes('不是 16:9'));
+    expect(notices).toHaveLength(1);
+    expect(notices[0]).toContain('1233×720');
+    expect(notices[0]).toContain('右边缘');
+    expect(notices[0]).not.toContain('请把窗口改回 16:9');
+    expect(warns.filter((line) => line.includes('不是 16:9'))).toHaveLength(0);
+
+    // 同一比例再抓一帧不会重复提示。
+    await toolOf(world, 'ark_screencap').handler({}, call);
+    expect(infos.filter((line) => line.includes('不是 16:9'))).toHaveLength(1);
+  });
+
+  it('16:9 画面不产生比例提示', async () => {
+    const { world, warns, infos } = newWorld();
     await toolOf(world, 'ark_connect').handler({}, call);
     await toolOf(world, 'ark_screencap').handler({}, call);
     expect(warns.filter((line) => line.includes('不是 16:9'))).toHaveLength(0);
+    expect(infos.filter((line) => line.includes('不是 16:9'))).toHaveLength(0);
   });
 
   it('参数不是布尔值时拒绝执行，也不发点击', async () => {

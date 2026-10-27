@@ -21,13 +21,20 @@ export function toPixel(normalized: number, size: number): number {
 /** 16:9 的宽高比；暂停键默认值就是按这个比例标定的。 */
 export const ASPECT_16_9 = 16 / 9;
 
+/** 与 16:9 的宽高比偏差；非法尺寸返回 `Infinity`（按「最坏情况」处理）。 */
+export function aspectDeviation(width: number, height: number): number {
+  if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) {
+    return Number.POSITIVE_INFINITY;
+  }
+  return Math.abs(width / height - ASPECT_16_9);
+}
+
 /**
  * 判断画面是否接近 16:9。容差 0.02 足够把 1280×720（1.778）与 1152×720（1.600）分开，
  * 又不会因为一两个像素的取整误差误报。
  */
 export function is16by9(width: number, height: number, tolerance = 0.02): boolean {
-  if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) return false;
-  return Math.abs(width / height - ASPECT_16_9) <= tolerance;
+  return aspectDeviation(width, height) <= tolerance;
 }
 
 /** 一次点击的落点。 */

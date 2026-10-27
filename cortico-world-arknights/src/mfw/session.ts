@@ -12,7 +12,7 @@ import {
   type MaaModule,
 } from './native.ts';
 import { ArknightsOcr, builtinOcrModelDir, type OcrOutcome } from './ocr.ts';
-import { is16by9 } from './geometry.ts';
+import { aspectDeviation, is16by9 } from './geometry.ts';
 import { pickWindow, parseKeywords, describeDevices, type WindowInfo } from './window.ts';
 import { pngSize, toPngBytes } from './screen.ts';
 import { errorText, withTimeout } from './timeout.ts';
@@ -25,6 +25,11 @@ const SWIPE_TIMEOUT_MS = 8_000;
 
 /** 截图方式与输入方式都缺省时的兜底组合：后台可采（FramePool/PrintWindow）+ 后台可点。 */
 const FALLBACK_SCREENCAP = 'Background';
+/**
+ * 画面比例与 16:9 的偏差容忍度：不超过这个值只发 info（暂停按钮的 x 已按右边缘余量换算，
+ * 轻微偏差通常点得中）；超过才 warn，要求重标或改窗口。0.08 在 720 高下约等于宽度 1223~1338。
+ */
+const ASPECT_NOTICE_TOLERANCE = 0.08;
 // 实测：SendMessage 点不中右上角的小按钮，AnchoredTouch 可以且不抢前台。
 const FALLBACK_INPUT = 'AnchoredTouch';
 
@@ -67,7 +72,8 @@ export class ArknightsSession {
   /** 最近一帧的真实像素尺寸；点击换算以它为准。 */
   private lastFrameSize: { width: number; height: number } | null = null;
   private warnedSizeMismatch = false;
-  private warnedAspect = false;
+  /** 比例提示的级别，用于「只提示一次」以及 minor → major 的升级。 */
+  private aspectTier: 'ok' | 'minor' | 'major' = 'ok';
 
   constructor(
     private readonly load: () => Promise<MaaLoadResult> = loadMaa,
@@ -248,15 +254,35 @@ export class ArknightsSession {
     );
   }
 
-  /** 暂停坐标是按 16:9 标定的；比例一变，按钮的相对位置就不再可信。 */
+  /**
+   * 画面比例偏离 16:9 时给提示，按偏差分级。
+   *
+   * 暂停按钮的 x 已经按「距右边缘的余量」换算（16:9 下与旧值完全一致），所以 16:10、1.71:1
+   * 这类轻微偏差通常点得中，只值得一条 info；只有偏差大到内容区可能被黑边压缩时才 warn。
+   */
   private checkAspect(size: { width: number; height: number }): void {
-    if (this.warnedAspect) return;
-    if (is16by9(size.width, size.height)) return;
-    this.warnedAspect = true;
-    this.warn(
-      `当前画面 ${size.width}×${size.height} 不是 16:9，而暂停坐标是按 16:9 标定的，ark_set_paused 可能点偏。`
-        + '请把窗口改回 16:9 后重启扩展（重新连接会清掉这条标记），或按 README 的步骤重新标定 pauseButton。',
-    );
+    const deviation = aspectDeviation(size.width, size.height);
+    const tier: 'ok' | 'minor' | 'major' = is16by9(size.width, size.height)
+      ? 'ok'
+      : deviation <= ASPECT_NOTICE_TOLERANCE ? 'minor' : 'major';
+    if (tier === this.aspectTier) return;
+    this.aspectTier = tier;
+
+    if (tier === 'minor') {
+      this.info(
+        `当前画面 ${size.width}×${size.height} 不是 16:9（偏差 ${deviation.toFixed(3)}）。`
+          + '暂停按钮的 x 已按距右边缘的余量换算，通常仍能点中；'
+          + '只有画面上下出现黑边、内容区被压缩时才会偏，那时按 README 重标 pauseButton。',
+      );
+      return;
+    }
+    if (tier === 'major') {
+      // minor → major 允许升级一次：窗口被改成更极端的比例时仍然要提醒。
+      this.warn(
+        `当前画面 ${size.width}×${size.height} 不是 16:9，偏差较大（${deviation.toFixed(3)}），ark_set_paused 可能点偏。`
+          + '请把窗口改回 16:9 后重启扩展（重新连接会清掉这条标记），或按 README 的步骤重新标定 pauseButton。',
+      );
+    }
   }
 
   async click(x: number, y: number): Promise<ActionResult> {
@@ -324,7 +350,7 @@ export class ArknightsSession {
     this.maa = null;
     this.lastFrameSize = null;
     this.warnedSizeMismatch = false;
-    this.warnedAspect = false;
+    this.aspectTier = 'ok';
   }
 
   private readResolution(): readonly [number, number] | null {

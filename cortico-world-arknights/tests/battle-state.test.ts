@@ -48,6 +48,12 @@ describe('区域归类', () => {
     expect(regionOf({ x: 0.3, y: 0.85, w: 0.04, h: 0.03 })).toBe('hand');
     expect(regionOf({ x: 0.3, y: 0.875, w: 0.04, h: 0.03 })).toBe('unknown');
   });
+
+  it('右上角的速度/暂停图标不算顶部条，避免 I1 被纠错成假生命值', () => {
+    // 真机里暂停图标被读成「I1」（中心 x≈0.94）；圈进 top 就会变成生命 11。
+    expect(regionOf(px('I1', 1140, 31, 40, 40, 1233, 720).box)).toBe('unknown');
+    expect(regionOf(px('1X', 1023, 16, 58, 58, 1233, 720).box)).toBe('unknown');
+  });
 });
 
 describe('战场状态解析', () => {
