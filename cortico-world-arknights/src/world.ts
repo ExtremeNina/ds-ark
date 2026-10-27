@@ -492,20 +492,22 @@ export class ArknightsWorld implements World {
       ? Math.min(10_000, Math.max(500, Math.round(timeoutMs)))
       : 3000;
     const started = Date.now();
+    const target = expect.toLowerCase();
     for (;;) {
-      await new Promise((resolve) => setTimeout(resolve, 500));
+      // 预算里也包含抓帧与 OCR 的耗时：否则「最多 10 秒」会变成「最多 10 秒 + 十几次识别」。
+      const remaining = budget - (Date.now() - started);
+      if (remaining <= 0) break;
+      await new Promise((resolve) => setTimeout(resolve, Math.min(500, remaining)));
       const shot = await this.session.screencap();
       if (!shot.ok) return `${receipt}复核失败（${shot.error}），无法确认「${expect}」是否出现。`;
       const ocr = await this.session.recognizeFrame(shot.png, this.opts.cfg.resourceDir);
       if (!ocr.ok) return `${receipt}复核失败（${ocr.error}），无法确认「${expect}」是否出现。`;
-      if (ocr.lines.some((line) => line.text.includes(expect))) {
+      if (ocr.lines.some((line) => line.text.toLowerCase().includes(target))) {
         return `${receipt}约 ${Date.now() - started}ms 后画面里出现了「${expect}」。`;
       }
-      if (Date.now() - started >= budget) {
-        return `${receipt}在 ${budget}ms 内没在画面里读到「${expect}」；这不代表点击一定没生效，`
-          + '可能只是文字没被识别、或界面还在加载。';
-      }
     }
+    return `${receipt}在 ${budget}ms 内没在画面里读到「${expect}」；这不代表点击一定没生效，`
+      + '可能只是文字没被识别、或界面还在加载。';
   }
 
   /** 通用拖拽：滚动列表、切章节、拖动滑块都走这里。 */
@@ -568,16 +570,18 @@ export class ArknightsWorld implements World {
     }
 
     const head = `画面 ${frame[0]}×${frame[1]}，识别到 ${lines.length} 行`
-      + '（按从上到下、从左到右排序；坐标是归一化 x,y,w,h）：';
+      + '（按从上到下、从左到右排序；中心与框都是归一化坐标，框是 x,y,w,h）：';
     const body = lines.slice(0, maxLines).map((line) => {
       const { x, y, w, h } = line.box;
-      const px = `${Math.round(x * frame[0])},${Math.round(y * frame[1])},`
-        + `${Math.round(w * frame[0])},${Math.round(h * frame[1])}`;
-      return `「${line.text}」 ${x.toFixed(3)},${y.toFixed(3)} ${w.toFixed(3)},${h.toFixed(3)}　像素 ${px}`;
+      const centerX = x + w / 2;
+      const centerY = y + h / 2;
+      const px = `${Math.round(centerX * frame[0])},${Math.round(centerY * frame[1])}`;
+      return `「${line.text}」 中心 ${centerX.toFixed(3)},${centerY.toFixed(3)}（像素 ${px}）`
+        + `　框 ${x.toFixed(3)},${y.toFixed(3)} ${w.toFixed(3)},${h.toFixed(3)}`;
     }).join('\n');
     const tail = lines.length > maxLines
       ? `\n（只列前 ${maxLines} 行，共 ${lines.length} 行；要全部就把 maxLines 调大，上限 200）`
       : '';
-    return `${head}\n${body}${tail}\n找按钮就用上面的归一化 x,y 调 ark_click；这一步只读，没有点击。`;
+    return `${head}\n${body}${tail}\n找按钮就用上面的「中心」坐标调 ark_click；这一步只读，没有点击。`;
   }
 }

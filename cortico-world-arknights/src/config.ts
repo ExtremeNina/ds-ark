@@ -127,10 +127,10 @@ export const ARKNIGHTS_CONFIG_GROUP: ConfigGroup = {
       },
       'worlds.arknights.verifyAfterClick': {
         type: 'boolean',
-        title: '点击后补拍一帧',
+        title: '动作后补拍一帧',
         description:
-          '开启后每次暂停/恢复都会多抓一帧作为附件，让模型自己看有没有生效；'
-          + '代价是多一次截图和一张图的 token。',
+          '开启后暂停、通用点击、通用拖拽都会多抓一帧作为附件，让模型自己看有没有生效；'
+          + '代价是多一次截图和一张图的 token。ark_ocr 与带 expect 的点击不附图。',
         'x-hot': true,
       },
       'worlds.arknights.deployHoldMs': {
