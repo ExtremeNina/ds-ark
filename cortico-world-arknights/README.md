@@ -162,9 +162,12 @@ corepack pnpm install
 pnpm smoke                                   # 只截图，存 <前缀>-before.png
 pnpm smoke --state                           # 抓帧 + 识别战场数字，打印原始行与结构化结果
 pnpm smoke --watch                           # 只读循环：每 3 秒读一次，认到结算自动退出
-pnpm smoke --auto                            # 本地自动打一局：固定策略，直到结算
+pnpm smoke --auto                            # 一次性战斗测试：固定策略，直到结算，最后打一行汇总
 pnpm smoke --auto --auto-tiles "0.4,0.55;0.5,0.65"   # 自己给候选地块
-pnpm smoke --auto --auto-max 40              # 最多走多少步（默认 30）
+pnpm smoke --auto --auto-max 40              # 最多读多少次状态（默认 30）
+pnpm smoke --auto --auto-attempts 5          # 每步最多试几个地块（默认 3）
+pnpm smoke --auto --auto-time 900            # 整体时间上限，秒（默认 600）
+pnpm smoke --auto --hold 600 --gap 150 --dir 250      # 同时覆盖拖拽时序
 pnpm smoke --ocr                             # 只跑识别，额外打印原始明细（排障用）
 pnpm smoke --click                           # 点配置里的暂停坐标，再存一张 <前缀>-after.png
 pnpm smoke --click 60,555                    # 按像素点一个大目标，用来判断输入有没有送达

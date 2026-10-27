@@ -6,7 +6,9 @@
  *   pnpm smoke --watch [ms]                     只读循环：每 ms（默认 3000）读一次，认到结算自动退出
  *   pnpm smoke --auto                           本地自动打一局（固定策略，不需要模型）：下得起就下，直到结算
  *   pnpm smoke --auto --auto-tiles "0.4,0.55;0.5,0.65"   自己给候选地块（默认一张常见清单）
- *   pnpm smoke --auto --auto-max 40             最多走多少步（默认 30）
+ *   pnpm smoke --auto --auto-max 40             最多读多少次状态（默认 30）
+ *   pnpm smoke --auto --auto-attempts 5         每步最多试几个地块（默认 3）
+ *   pnpm smoke --auto --auto-time 900           整体时间上限，秒（默认 600）
  *   pnpm smoke --deploy ... --hold 600 --gap 150 --dir 250   临时改部署时序（毫秒），不写进配置
  *   pnpm smoke --ocr                            只跑识别，额外打印原始识别明细（确认模型路径与返回结构）
  *   pnpm smoke --click                          点配置里的暂停坐标（默认 0.966 / 0.071）
@@ -129,42 +131,75 @@ async function readState(session: ArknightsSession, cfg: ArknightsConfigSection)
   return { ok: true, state: parseBattleState(ocr.lines) };
 }
 
+export interface AutoOptions {
+  /** 最多读多少次状态（每次状态算一步）。 */
+  readonly maxSteps: number;
+  /** 每步最多试几个地块：一次没落位就换下一个，避免一张卡反复拖同一处。 */
+  readonly attempts: number;
+  /** 整体时间上限（毫秒），到点就收工。 */
+  readonly maxMs: number;
+  readonly timing: { holdMs: number; gapMs: number; directionMs: number };
+}
+
 /**
- * 本地自动打一局：固定策略，不调任何模型。
+ * 一次性战斗测试：固定策略，不调任何模型。
  *
- * 策略很朴素——费用够就下最左边那张、往候选地块轮流试，靠「费用有没有掉」判断落位，
- * 认到结算就停。它的用途是验收整条链路（读状态 → 部署 → 再读 → 结算），不是打通关。
+ * 策略很朴素——费用够就下最左边那张，往候选地块轮流试，靠「费用有没有掉」判断落位；
+ * 每步最多试 attempts 个地块，认到结算、步数或时间到上限就收工，最后打印一行汇总。
+ * 用途是验收整条链路（读状态 → 部署 → 再读 → 结算），不追求通关质量。
  */
 async function runAuto(
   session: ArknightsSession,
   cfg: ArknightsConfigSection,
   tiles: ReadonlyArray<{ x: number; y: number }>,
-  maxSteps: number,
-  timing: { holdMs: number; gapMs: number; directionMs: number },
+  opts: AutoOptions,
 ): Promise<void> {
+  const started = Date.now();
+  const elapsed = () => `${Math.round((Date.now() - started) / 1000)}s`;
+  let steps = 0;
+  let landed = 0;
+  let missed = 0;
+  let tileCursor = 0;
+  let result: 'victory' | 'defeat' | null = null;
+
+  const finish = (reason: string): void => {
+    const outcome = result === null ? '未结算' : result === 'victory' ? '胜利' : '失败';
+    console.log(
+      `[auto] 结束：${outcome}｜用时 ${elapsed()}｜步数 ${steps}｜落位 ${landed}｜失败尝试 ${missed}（${reason}）`,
+    );
+  };
+
   console.log(
-    `[auto] 本地自动打：最多 ${maxSteps} 步，${tiles.length} 个候选地块，落位靠费用变化判断；`
-      + `按住 ${timing.holdMs}ms / 间隔 ${timing.gapMs}ms / 定向 ${timing.directionMs}ms。`,
+    `[auto] 一次性战斗测试：最多 ${opts.maxSteps} 步 / ${Math.round(opts.maxMs / 1000)}s，`
+      + `每步最多试 ${opts.attempts} 个地块；`
+      + `按住 ${opts.timing.holdMs}ms / 间隔 ${opts.timing.gapMs}ms / 定向 ${opts.timing.directionMs}ms。`,
   );
-  for (let step = 1; step <= maxSteps; step += 1) {
+
+  for (let step = 1; step <= opts.maxSteps; step += 1) {
+    if (Date.now() - started > opts.maxMs) {
+      finish('到达时间上限');
+      return;
+    }
     const read = await readState(session, cfg);
     if (!read.ok) {
       console.log(`[auto ${step}] 读状态失败：${read.error}`);
+      finish('读状态失败');
       return;
     }
     const { state } = read;
+    steps = step;
     console.log(
       `[auto ${step}] ${state.result ?? '对局中'}｜费用 ${state.cost ?? '?'}｜生命 ${state.life ?? '?'}`
-        + `｜敌人 ${state.enemies ?? '?'}｜手牌 ${state.handCosts.length || '?'} 张`,
+        + `｜敌人 ${state.enemies ?? '?'}｜手牌 ${state.handCosts.length || '?'} 张｜${elapsed()}`,
     );
     if (state.result) {
-      console.log(`[auto] 已结算：${state.result === 'victory' ? '胜利' : '失败'}`);
+      result = state.result;
+      finish('已结算');
       return;
     }
 
     const size = session.resolution;
     if (!size) {
-      console.log('[auto] 拿不到画面尺寸，等一秒再试');
       await sleep(1000);
       continue;
     }
@@ -185,38 +220,60 @@ async function runAuto(
     }
 
     const card = affordable[0]!;
-    const tile = tiles[(step - 1) % tiles.length]!;
-    const planned = planDeploy({ x: Math.min(0.98, card.x + 0.02), y: 0.9 }, tile, 'right', size, timing);
-    if (!planned.ok) {
-      console.log(`[auto] 计划被拒：${planned.error}`);
-      continue;
-    }
-    const { plan } = planned;
-    const picked = await session.swipe(plan.card.x, plan.card.y, plan.tile.x, plan.tile.y, plan.holdMs);
-    if (!picked.ok) {
-      console.log(`[auto] 手牌 → 地块没发出去：${picked.error}`);
-      return;
-    }
-    if (plan.gapMs > 0) await sleep(plan.gapMs);
-    const aimed = await session.swipe(plan.tile.x, plan.tile.y, plan.release.x, plan.release.y, plan.directionMs);
-    if (!aimed.ok) {
-      console.log(`[auto] 定向拖拽没发出去：${aimed.error}`);
-      return;
-    }
-    console.log(
-      `[auto] 下 ${card.cost} 费卡：(${plan.card.x}, ${plan.card.y}) → (${plan.tile.x}, ${plan.tile.y})`
-        + ` → (${plan.release.x}, ${plan.release.y})`,
-    );
+    let placed = false;
+    for (let attempt = 1; attempt <= opts.attempts && !placed; attempt += 1) {
+      const tile = tiles[tileCursor++ % tiles.length]!;
+      const planned = planDeploy({ x: Math.min(0.98, card.x + 0.02), y: 0.9 }, tile, 'right', size, opts.timing);
+      if (!planned.ok) {
+        console.log(`[auto] 计划被拒：${planned.error}`);
+        break;
+      }
+      const { plan } = planned;
+      console.log(
+        `[auto] 下 ${card.cost} 费卡（尝试 ${attempt}/${opts.attempts}）：`
+          + `(${plan.card.x}, ${plan.card.y}) → (${plan.tile.x}, ${plan.tile.y}) → (${plan.release.x}, ${plan.release.y})`,
+      );
+      const picked = await session.swipe(plan.card.x, plan.card.y, plan.tile.x, plan.tile.y, plan.holdMs);
+      if (!picked.ok) {
+        console.log(`[auto] 手牌 → 地块没发出去：${picked.error}`);
+        finish('拖拽被拒绝');
+        return;
+      }
+      if (plan.gapMs > 0) await sleep(plan.gapMs);
+      const aimed = await session.swipe(plan.tile.x, plan.tile.y, plan.release.x, plan.release.y, plan.directionMs);
+      if (!aimed.ok) {
+        console.log(`[auto] 定向拖拽没发出去：${aimed.error}`);
+        finish('拖拽被拒绝');
+        return;
+      }
 
-    await sleep(1200);
-    const after = await readState(session, cfg);
-    if (after.ok && after.state.cost !== null && state.cost !== null && after.state.cost < state.cost - 3) {
-      console.log(`[auto] 落位成功（费用 ${state.cost} → ${after.state.cost}）`);
-    } else {
-      console.log('[auto] 这次没落位，下一轮换地块再试');
+      await sleep(1200);
+      const after = await readState(session, cfg);
+      if (!after.ok) {
+        missed += 1;
+        console.log(`[auto] 落位核对失败：${after.error}`);
+        continue;
+      }
+      if (after.state.result) {
+        result = after.state.result;
+        finish('已结算');
+        return;
+      }
+      const before = state.cost;
+      const now = after.state.cost;
+      if (before !== null && now !== null && now < before - 3) {
+        landed += 1;
+        placed = true;
+        console.log(`[auto] 落位成功（费用 ${before} → ${now}）`);
+      } else {
+        missed += 1;
+        console.log(`[auto] 这次没落位（费用 ${before ?? '?'} → ${now ?? '?'}），换地块再试`);
+      }
     }
+    if (!placed) await sleep(1500);
   }
-  console.log(`[auto] 到达步数上限 ${maxSteps}，停止（战斗可能还没结束）`);
+
+  finish(`到达步数上限 ${opts.maxSteps}`);
 }
 
 async function main(): Promise<void> {
@@ -247,6 +304,8 @@ async function main(): Promise<void> {
   const autoArg = take('auto');
   const autoTilesArg = take('auto-tiles');
   const autoMaxArg = take('auto-max');
+  const autoAttemptsArg = take('auto-attempts');
+  const autoTimeArg = take('auto-time');
   const holdArg = take('hold');
   const gapArg = take('gap');
   const dirArg = take('dir');
@@ -329,9 +388,14 @@ async function main(): Promise<void> {
       await session.stop();
       return;
     }
-    const rawMax = typeof autoMaxArg === 'string' ? Number(autoMaxArg) : Number.NaN;
-    const maxSteps = Number.isFinite(rawMax) ? Math.max(1, Math.min(80, Math.round(rawMax))) : 30;
-    await runAuto(session, cfg, tiles, maxSteps, timing);
+    const intOf = (raw: unknown, fallback: number, min: number, max: number): number => {
+      const value = typeof raw === 'string' ? Number(raw) : Number.NaN;
+      return Number.isFinite(value) ? Math.max(min, Math.min(max, Math.round(value))) : fallback;
+    };
+    const maxSteps = intOf(autoMaxArg, 30, 1, 80);
+    const attempts = intOf(autoAttemptsArg, 3, 1, 9);
+    const maxSeconds = intOf(autoTimeArg, 600, 30, 3600);
+    await runAuto(session, cfg, tiles, { maxSteps, attempts, maxMs: maxSeconds * 1000, timing });
     await session.stop();
     return;
   }

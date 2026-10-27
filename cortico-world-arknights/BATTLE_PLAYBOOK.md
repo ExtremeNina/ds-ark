@@ -68,7 +68,8 @@ ark_deploy { card, tile, direction }
 cd C:\Users\Nina\Desktop\ds-ark\test
 pnpm smoke --state                     # 看读数与是否已结算
 pnpm smoke --watch                     # 只读循环：每 3 秒读一次，结算或按 Ctrl+C 结束
-pnpm smoke --auto                      # 本地自动打一局（固定策略，认到结算退出）
+pnpm smoke --auto                      # 一次性战斗测试（固定策略，认到结算退出并打印汇总）
+pnpm smoke --auto --auto-attempts 5 --hold 600 --gap 150   # 地块多试几次 + 放慢拖拽
 pnpm smoke --deploy 0.12,0.90,0.45,0.55,right
 ```
 
