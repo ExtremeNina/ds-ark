@@ -20,7 +20,13 @@ export interface OcrLine {
 }
 
 export type OcrOutcome =
-  | { readonly ok: true; readonly lines: readonly OcrLine[]; readonly debug?: string }
+  | {
+    readonly ok: true;
+    readonly lines: readonly OcrLine[];
+    /** 绑定返回的原始明细：只给冒烟脚本 `--ocr` 排障用，不进模型上下文、工具也不读它。 */
+    readonly rawDetail?: unknown;
+    readonly debug?: string;
+  }
   | { readonly ok: false; readonly error: string };
 
 export type OcrLoadResult = { readonly ok: true } | { readonly ok: false; readonly error: string };
@@ -177,10 +183,11 @@ export class ArknightsOcr {
       return { ok: false, error: `识别失败：${errorText(error)}` };
     }
 
-    const lines = toOcrLines(this.pickDetail(tasker, job), size);
+    const detail = this.pickDetail(tasker, job);
+    const lines = toOcrLines(detail, size);
     return lines.length > 0
-      ? { ok: true, lines }
-      : { ok: true, lines, debug: '识别完成，但结果里没有带文字的条目' };
+      ? { ok: true, lines, rawDetail: detail }
+      : { ok: true, lines, rawDetail: detail, debug: '识别完成，但结果里没有带文字的条目' };
   }
 
   /** 先按 `TaskDetail.nodes → node_detail().reco` 取；取不到再退回 `recognition_detail()`。 */
