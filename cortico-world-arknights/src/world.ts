@@ -9,7 +9,7 @@ import { nowIso } from 'cortico/core/util.ts';
 import { DEPLOY_DIRECTIONS, planDeploy } from './battle/deploy.ts';
 import { describeBattleState, parseBattleState } from './battle/state.ts';
 import { ARKNIGHTS_CONFIG_GROUP, type ArknightsConfigSection } from './config.ts';
-import { toPoint } from './mfw/geometry.ts';
+import { pausePoint } from './mfw/geometry.ts';
 import { SCREENSHOT_MIME, screenshotName } from './mfw/screen.ts';
 import { ArknightsSession } from './mfw/session.ts';
 
@@ -240,12 +240,12 @@ export class ArknightsWorld implements World {
     }
     const cfg = this.opts.cfg;
     const [width, height] = size;
-    const { x, y } = toPoint(cfg.pauseButton, [width, height]);
+    const { x, y } = pausePoint(cfg.pauseButton, [width, height]);
     const clicked = await this.session.click(x, y);
     if (!clicked.ok) return fail(clicked.error);
     const action = paused ? '暂停' : '继续';
-    const receipt = `已向 (${x}, ${y}) 发送一次点击（按 ${width}×${height} 的 ${(cfg.pauseButton.x * 100).toFixed(1)}% / `
-      + `${(cfg.pauseButton.y * 100).toFixed(1)}% 换算），意图是${action}。`;
+    const receipt = `已向 (${x}, ${y}) 发送一次点击（按 ${width}×${height} 换算：x 取距右边缘的余量，`
+      + `y 取 ${(cfg.pauseButton.y * 100).toFixed(1)}% 高度），意图是${action}。`;
 
     if (!cfg.verifyAfterClick) {
       return `${receipt}这是点击回执，无法确认游戏是否真的${action}；需要确认请再调用 ark_screencap 自己看。`;

@@ -38,3 +38,22 @@ export function toPoint(
   const [width, height] = size;
   return { x: toPixel(norm?.x ?? 0, width), y: toPixel(norm?.y ?? 0, height) };
 }
+
+/**
+ * 暂停按钮的落点。
+ *
+ * 16:9 下与 `toPoint` 完全一致（默认值在 1280×720 上都是 1236, 51），已标定过的坐标不会失效。
+ * 其他比例下按钮仍然贴着右边缘、余量随画面高度缩放，所以用「距右边缘的像素余量」换算，
+ * 而不是宽度比例——后者在 4:3 的画面上会偏 10 px 以上。y 不受宽度影响，照旧按高度换算。
+ */
+export function pausePoint(
+  norm: { readonly x: number; readonly y: number },
+  size: readonly [number, number],
+): { x: number; y: number } {
+  const [width, height] = size;
+  if (is16by9(width, height)) return toPoint(norm, size);
+  const last = Math.max(0, Math.floor(width) - 1);
+  // 16:9 的参照宽度是 16/9 × 高度；把 x 换算成「距右边缘多少像素」，再贴到当前帧的右边缘。
+  const margin = Math.round((1 - clamp01(norm?.x ?? 0)) * ASPECT_16_9 * Math.max(0, Math.floor(height) - 1));
+  return { x: Math.min(last, Math.max(0, last - margin)), y: toPixel(norm?.y ?? 0, height) };
+}

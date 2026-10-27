@@ -11,12 +11,13 @@ function line(text: string, x: number, y: number, w = 0.04, h = 0.03): OcrLine {
 const enemies = (text = '0/11') => line(text, 0.38, 0.02, 0.06);
 const life = (text = '20') => line(text, 0.52, 0.02, 0.03);
 const cost = (text = '28') => line(text, 0.94, 0.79);
-const card = (text: string, x: number) => line(text, x, 0.92, 0.03);
+/** 手牌卡费：真机帧里中心 y≈0.85，所以框顶取 0.84。 */
+const card = (text: string, x: number) => line(text, x, 0.84, 0.03);
 const banner = (text = 'PAUSE') => line(text, 0.45, 0.40, 0.10, 0.06);
 
-/** 真机帧是 1280×720；直接按像素写框，省得手算归一化写错。 */
-function px(text: string, x: number, y: number, w: number, h: number): OcrLine {
-  return { text, box: { x: x / 1280, y: y / 720, w: w / 1280, h: h / 720 } };
+/** 直接按像素写框（默认 1280×720 的真机帧），省得手算归一化写错。 */
+function px(text: string, x: number, y: number, w: number, h: number, frameW = 1280, frameH = 720): OcrLine {
+  return { text, box: { x: x / frameW, y: y / frameH, w: w / frameW, h: h / frameH } };
 }
 
 describe('区域归类', () => {
@@ -40,6 +41,12 @@ describe('区域归类', () => {
     // 中心 y=0.819 → 费用；中心 y=0.831 → 手牌（手牌判定在前，双保险）。
     expect(regionOf({ x: 0.9, y: 0.804, w: 0.04, h: 0.03 })).toBe('cost');
     expect(regionOf({ x: 0.9, y: 0.816, w: 0.04, h: 0.03 })).toBe('hand');
+  });
+
+  it('手牌带上界收在卡费行，卡面下沿的数字不算手牌', () => {
+    // 中心 0.865 → 手牌；中心 0.89 → 落在区间外（真机上那里只有卡面图案）。
+    expect(regionOf({ x: 0.3, y: 0.85, w: 0.04, h: 0.03 })).toBe('hand');
+    expect(regionOf({ x: 0.3, y: 0.875, w: 0.04, h: 0.03 })).toBe('unknown');
   });
 });
 
@@ -141,6 +148,48 @@ describe('战场状态解析', () => {
     // 最右一张卡（24）留在 hand，部署费用取右下角的 29。
     expect(state.cost).toBe(29);
     expect(missingFields(state)).toEqual([]);
+  });
+
+  it('真机第二帧回归：手牌里不该冒出一张 4 费', () => {
+    // 坐标照抄部署银灰之后那一帧（1233×720、暂停中）；「4」在卡面下沿 y=638。
+    const frame = (text: string, x: number, y: number, w: number, h: number) => px(text, x, y, w, h, 1233, 720);
+    const state = parseBattleState([
+      frame('N12', 16, 600, 58, 33),
+      frame('4', 123, 638, 20, 24),
+      frame('N16', 222, 597, 58, 33),
+      frame('A16', 331, 600, 58, 33),
+      frame('A17', 427, 602, 58, 33),
+      frame('PAUSE', 464, 283, 300, 88),
+      frame('ENEMY', 472, 35, 60, 17),
+      frame('O/11', 529, 11, 56, 29),
+      frame('非18', 530, 597, 62, 33),
+      frame('暂停中', 571, 365, 90, 35),
+      frame('819', 635, 600, 62, 33),
+      frame('漢', 653, 8, 28, 26),
+      frame('20', 714, 17, 36, 27),
+      frame('1X', 1023, 16, 58, 58),
+      frame('剩余可放置角色：7', 1041, 555, 170, 23),
+      frame('24', 1046, 598, 66, 34),
+      frame('C', 1118, 506, 40, 40),
+      frame('16', 1162, 501, 60, 44),
+    ]);
+    expect(state.enemies).toBe('0/11');
+    expect(state.life).toBe(20);
+    expect(state.paused).toBe(true);
+    expect(state.cost).toBe(16);
+    // 12 / 16 / 16 / 17 / 18 / 24：没有 4，`819` 也按三位误识丢掉了。
+    expect(state.handCosts.map((c) => c.cost)).toEqual([12, 16, 16, 17, 18, 24]);
+  });
+
+  it('手牌按排聚类：即便区间放进来了，偏离卡费行的数字也会被剔除', () => {
+    const state = parseBattleState([
+      line('12', 0.10, 0.83, 0.04, 0.03),
+      line('16', 0.30, 0.83, 0.04, 0.03),
+      line('20', 0.50, 0.83, 0.04, 0.03),
+      // 中心 y=0.87，仍在手牌带内，但比这一排低 0.025。
+      line('4', 0.70, 0.855, 0.03, 0.03),
+    ]);
+    expect(state.handCosts.map((c) => c.cost)).toEqual([12, 16, 20]);
   });
 });
 

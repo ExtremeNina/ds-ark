@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { clamp01, is16by9, toPixel, toPoint } from '../src/mfw/geometry.ts';
+import { clamp01, is16by9, pausePoint, toPixel, toPoint } from '../src/mfw/geometry.ts';
 
 describe('画面比例判定', () => {
   it('16:9 的各种分辨率都算命中', () => {
@@ -57,5 +57,32 @@ describe('归一化坐标换算', () => {
   it('极小分辨率也不会越界', () => {
     expect(toPoint({ x: 1, y: 1 }, [1, 1])).toEqual({ x: 0, y: 0 });
     expect(toPoint({ x: 1, y: 1 }, [2, 3])).toEqual({ x: 1, y: 2 });
+  });
+});
+
+describe('暂停落点', () => {
+  const pause = { x: 0.966, y: 0.071 };
+
+  it('16:9 下与 toPoint 完全一致，已标定的坐标不失效', () => {
+    expect(pausePoint(pause, [1280, 720])).toEqual(toPoint(pause, [1280, 720]));
+    expect(pausePoint(pause, [1280, 720])).toEqual({ x: 1236, y: 51 });
+  });
+
+  it('轻微非 16:9 时与按比例换算只差 1px', () => {
+    const point = pausePoint(pause, [1233, 720]);
+    expect(point).toEqual({ x: 1189, y: 51 });
+    expect(Math.abs(point.x - toPoint(pause, [1233, 720]).x)).toBeLessThanOrEqual(2);
+  });
+
+  it('4:3 时按比例会偏 10px，按右边缘余量仍然贴边', () => {
+    const point = pausePoint(pause, [960, 720]);
+    expect(point.x).toBe(916);
+    expect(toPoint(pause, [960, 720]).x - point.x).toBe(10);
+    expect(point.y).toBe(51);
+  });
+
+  it('越界与脏值不产生 NaN', () => {
+    expect(pausePoint({ x: Number.NaN, y: Number.NaN }, [0, 0])).toEqual({ x: 0, y: 0 });
+    expect(pausePoint({ x: 2, y: -1 }, [960, 720])).toEqual({ x: 959, y: 0 });
   });
 });

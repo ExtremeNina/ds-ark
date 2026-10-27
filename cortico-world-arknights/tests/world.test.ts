@@ -412,9 +412,10 @@ describe('明日方舟 World', () => {
     expect(sizeWarns).toHaveLength(1);
     expect(sizeWarns[0]).toContain('800×500');
 
-    // 抓过帧以后一律按帧的 800×500 换算
+    // 抓过帧以后一律按帧的 800×500 换算；非 16:9 时 x 按距右边缘的余量贴边
+    // （(1-0.5) × 16/9 × 499 ≈ 444 → 799-444 = 355），y 仍按高度比例。
     await toolOf(world, 'ark_set_paused').handler({ paused: false }, call);
-    expect(FakeController.clicks.at(-1)).toEqual([400, 250]);
+    expect(FakeController.clicks.at(-1)).toEqual([355, 250]);
 
     // 再抓一帧不重复刷日志
     await toolOf(world, 'ark_screencap').handler({}, call);
@@ -497,8 +498,9 @@ describe('明日方舟 World', () => {
       { text: '0/11', box: [480, 10, 60, 24] },
       { text: '20', box: [660, 8, 30, 26] },
       { text: '28', box: [1190, 560, 40, 30] },
-      { text: '12', box: [40, 668, 24, 20] },
-      { text: '16', box: [300, 668, 24, 20] },
+      // 卡费在 y≈600（归一化 0.84），跟真机帧一致；旧的 668 会落到手牌带外面。
+      { text: '12', box: [40, 598, 24, 20] },
+      { text: '16', box: [300, 598, 24, 20] },
     ];
     // 不配 resourceDir：内置模型就是默认来源。
     writeFakeModel(scratchDir);

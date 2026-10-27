@@ -61,13 +61,38 @@ function toCardCost(text: string): number | null {
   return match ? Number(match[1]) : null;
 }
 
+/** 手牌候选：除费用外还留着中心 y，用来判断它是不是和别的卡费在同一排。 */
+interface HandCandidate {
+  readonly cost: number;
+  readonly x: number;
+  readonly y: number;
+}
+
+/** 同一排卡费的中心 y 离散只有 0.01 上下；偏出这个范围的，多半是卡面上别的图案。 */
+const HAND_ROW_TOLERANCE = 0.02;
+/** 少于三项就不聚类：两个点分不清哪一排是真的。 */
+const HAND_ROW_MIN_SAMPLES = 3;
+
+/**
+ * 丢掉不在卡费那一排的候选。
+ *
+ * 卡面下半部分还有别的图案，被识别成数字时能通过 `toCardCost`（比如「4」），
+ * 单靠区间收边容易在 UI 微调后再漏一次，所以按 y 的中位数再筛一道。
+ */
+function keepHandRow(cards: readonly HandCandidate[]): HandCandidate[] {
+  if (cards.length < HAND_ROW_MIN_SAMPLES) return [...cards];
+  const ys = cards.map((card) => card.y).sort((a, b) => a - b);
+  const median = ys[Math.floor(ys.length / 2)]!;
+  return cards.filter((card) => Math.abs(card.y - median) <= HAND_ROW_TOLERANCE);
+}
+
 /** 把识别行折成战场状态；同一位置出现多次时取第一个认到的值。 */
 export function parseBattleState(lines: readonly OcrLine[]): BattleState {
   let cost: number | null = null;
   let life: number | null = null;
   let enemies: string | null = null;
   let paused: boolean | null = null;
-  const handCosts: Array<{ cost: number; x: number }> = [];
+  const handCandidates: HandCandidate[] = [];
 
   for (const line of lines) {
     const text = line.text.trim();
@@ -88,7 +113,13 @@ export function parseBattleState(lines: readonly OcrLine[]): BattleState {
       }
       case 'hand': {
         const value = toCardCost(text);
-        if (value !== null) handCosts.push({ cost: value, x: line.box.x + line.box.w / 2 });
+        if (value !== null) {
+          handCandidates.push({
+            cost: value,
+            x: line.box.x + line.box.w / 2,
+            y: line.box.y + line.box.h / 2,
+          });
+        }
         break;
       }
       case 'cost':
@@ -100,7 +131,9 @@ export function parseBattleState(lines: readonly OcrLine[]): BattleState {
     }
   }
 
-  handCosts.sort((a, b) => a.x - b.x);
+  const handCosts = keepHandRow(handCandidates)
+    .sort((a, b) => a.x - b.x)
+    .map(({ cost: value, x }) => ({ cost: value, x }));
   return { cost, life, enemies, paused, handCosts };
 }
 
