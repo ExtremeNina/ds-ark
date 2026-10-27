@@ -33,8 +33,7 @@
   ],
   "scripts": {
     "test": "vitest run",
-    "typecheck": "tsc --noEmit",
-    "smoke": "tsx scripts/smoke.ts"
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@maaxyz/maa-node": "5.14.3"

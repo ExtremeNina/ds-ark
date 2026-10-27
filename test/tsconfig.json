@@ -1,0 +1,19 @@
+{
+  // 这个包只跑真机冒烟，源码直接引用同仓库的扩展包，不产出任何构建物。
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "allowImportingTsExtensions": true,
+    "lib": ["ES2022"],
+    "types": ["node"],
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "resolveJsonModule": true,
+    "noEmit": true
+  },
+  "include": ["smoke.ts"],
+  "exclude": ["node_modules"]
+}

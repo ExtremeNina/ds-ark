@@ -1,0 +1,21 @@
+{
+  "name": "cortico-world-arknights-test",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Real-machine smoke checks for cortico-world-arknights. Not part of the extension package.",
+  "packageManager": "pnpm@11.28.6",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "smoke": "tsx smoke.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "cortico": "^0.2.8",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  }
+}

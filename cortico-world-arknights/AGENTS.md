@@ -18,9 +18,10 @@ Release checklist for this Cortico World extension. Contract references:
 - [ ] **CHANGELOG.md** has a `## <version>` section for the version being published.
 - [ ] **`os`**: stays `["win32"]`; the native dependency has no other usable controller for this use case.
 - [ ] **`files`**: ships `src`, `README.md`, `CHANGELOG.md`, `LICENSE`, `describe.json` only.
-      `tests/` and `scripts/` stay out of the published package.
-- [ ] **`pnpm test` and `pnpm typecheck`** pass, and `pnpm smoke` has been run once against a
-      real game window before publishing.
+      `tests/` stays out of the published package, and real-machine scripts live in the repo-level
+      `test/` package, never here.
+- [ ] **`pnpm test` and `pnpm typecheck`** pass, and the smoke script in `test/` has been run once
+      against a real game window before publishing.
 - [ ] **No network, no secrets**: the extension must not add outbound requests or read `ctx.secret()`.
 
 Requests to the maintainers (tag changes, certification, a replacement package, appeals) are issues in

@@ -5,19 +5,20 @@
  *   pnpm smoke --click  额外对配置的暂停坐标点一次
  *
  * 不联网、不读任何密钥；图片只写到当前目录，方便肉眼看截图对不对。
+ * 这里直接引用同仓库扩展包的源码（不经过 npm 解析），所以改完扩展不用重装依赖。
  */
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { ARKNIGHTS_DEFAULTS } from '../src/config.ts';
-import { toPoint } from '../src/mfw/geometry.ts';
-import { ArknightsSession } from '../src/mfw/session.ts';
+import { ARKNIGHTS_DEFAULTS } from '../cortico-world-arknights/src/config.ts';
+import { toPoint } from '../cortico-world-arknights/src/mfw/geometry.ts';
+import { ArknightsSession } from '../cortico-world-arknights/src/mfw/session.ts';
 
 const click = process.argv.includes('--click');
 const session = new ArknightsSession();
 
 const connected = await session.connect({ ...ARKNIGHTS_DEFAULTS, enabled: true });
 if (!connected.ok) {
-  console.error(`连接失败：${connected.error}`);
+  console.error(connected.error);
   process.exitCode = 1;
 } else {
   const [width, height] = connected.resolution;
@@ -26,7 +27,7 @@ if (!connected.ok) {
 
   const shot = await session.screencap();
   if (!shot.ok) {
-    console.error(`截图失败：${shot.error}`);
+    console.error(shot.error);
     process.exitCode = 1;
   } else {
     const file = join(process.cwd(), `smoke-${Date.now()}.png`);
@@ -38,7 +39,7 @@ if (!connected.ok) {
   if (click) {
     const { x, y } = toPoint(ARKNIGHTS_DEFAULTS.pauseButton, [width, height]);
     const clicked = await session.click(x, y);
-    console.log(clicked.ok ? `已向 (${x}, ${y}) 发送一次点击，去游戏里看暂停键是否响应。` : `点击失败：${clicked.error}`);
+    console.log(clicked.ok ? `已向 (${x}, ${y}) 发送一次点击，去游戏里看暂停键是否响应。` : clicked.error);
     if (!clicked.ok) process.exitCode = 1;
   } else {
     console.log('未发送点击。要试点击请跑：pnpm smoke --click');
