@@ -11,7 +11,7 @@ import {
   type MaaLoadResult,
 } from './native.ts';
 import { pickWindow, parseKeywords, describeDevices, type WindowInfo } from './window.ts';
-import { toPngBytes } from './screen.ts';
+import { pngSize, toPngBytes } from './screen.ts';
 import { errorText, withTimeout } from './timeout.ts';
 
 const CONNECT_TIMEOUT_MS = 15_000;
@@ -57,8 +57,14 @@ export class ArknightsSession {
   private ctrl: MaaControllerLike | null = null;
   private win: WindowInfo | null = null;
   private res: readonly [number, number] | null = null;
+  /** 最近一帧的真实像素尺寸；点击换算以它为准。 */
+  private frame: { width: number; height: number } | null = null;
+  private warnedSizeMismatch = false;
 
-  constructor(private readonly load: () => Promise<MaaLoadResult> = loadMaa) {}
+  constructor(
+    private readonly load: () => Promise<MaaLoadResult> = loadMaa,
+    private readonly warn: (line: string) => void = () => {},
+  ) {}
 
   get connected(): boolean {
     try {
@@ -72,14 +78,27 @@ export class ArknightsSession {
     return this.win;
   }
 
-  /** 画面尺寸；连接成功但还没抓到帧时为 `null`，调用方不得拿它当已知值用。 */
+  /**
+   * 画面尺寸；连接成功但还没抓到帧时为 `null`，调用方不得拿它当已知值用。
+   * 有帧以后一律用帧的真实像素尺寸：控制器报的尺寸与实际画面可能不是同一个坐标系。
+   */
   get resolution(): readonly [number, number] | null {
+    if (this.frame) return [this.frame.width, this.frame.height];
     return this.res ?? this.readResolution();
   }
 
+  /**
+   * 控制器自己报告的尺寸。排障用：`DXGI_DesktopDup` 这类方式报的是整屏尺寸，
+   * 与实际抓到的窗口画面不是一回事，不能拿它算点击坐标。
+   */
+  get controllerResolution(): readonly [number, number] | null {
+    return this.readResolution();
+  }
+
   async connect(cfg: ArknightsConfigSection): Promise<ConnectResult> {
-    if (this.ctrl && this.connected && this.win && this.res) {
-      return { ok: true, window: this.win, resolution: this.res };
+    const known = this.ctrl && this.connected && this.win ? this.resolution : null;
+    if (this.ctrl && this.win && known) {
+      return { ok: true, window: this.win, resolution: known };
     }
     await this.stop();
 
@@ -139,25 +158,25 @@ export class ArknightsSession {
       return {
         ok: false,
         error: `连接失败：控制器拒绝了连接（状态码 ${String(job.status)}）。`
-          + '常见原因：游戏以管理员权限运行、所选截图方式不可用、窗口已被其他程序独占。',
+          + '最常见的原因是权限不对等：游戏以管理员身份运行，而 Coopanion 不是——'
+          + '这样既抓不到画面，合成点击也会被系统拦掉。请让两者权限一致（都用管理员，或都不用）。'
+          + '其次是所选截图方式不适用于该窗口，或窗口被其他程序独占。',
       };
     }
 
     this.ctrl = ctrl;
     this.win = win;
     this.res = this.readResolution();
-    if (!this.res) {
+    if (!this.resolution) {
       // 连接成功但还没拿到分辨率：抓一帧把尺寸带出来，顺便确认截图链路真的通。
       const shot = await this.screencap();
-      const size = shot.ok ? this.readResolution() : null;
-      if (!size) {
+      if (!this.resolution) {
         await this.stop();
         const detail = shot.ok ? '抓到了画面但读不出尺寸' : shot.error;
         return { ok: false, error: `连接失败：窗口连上了但拿不到画面尺寸（${detail}）。已断开连接。` };
       }
-      this.res = size;
     }
-    return { ok: true, window: win, resolution: this.res };
+    return { ok: true, window: win, resolution: this.resolution! };
   }
 
   async screencap(): Promise<ScreencapResult> {
@@ -186,7 +205,22 @@ export class ArknightsSession {
           + '可改配置 worlds.arknights.screencapMethod。',
       };
     }
+    this.recordFrame(png);
     return { ok: true, png };
+  }
+
+  /** 记录本帧真实尺寸；与控制器报的尺寸不一致时只提醒一次，避免每帧刷日志。 */
+  private recordFrame(png: Uint8Array): void {
+    const size = pngSize(png);
+    if (!size) return;
+    this.frame = size;
+    const reported = this.readResolution();
+    if (this.warnedSizeMismatch || !reported) return;
+    if (reported[0] === size.width && reported[1] === size.height) return;
+    this.warnedSizeMismatch = true;
+    this.warn(
+      `控制器报告的尺寸 ${reported[0]}×${reported[1]} 与实际画面 ${size.width}×${size.height} 不一致，点击换算改用实际画面尺寸。`,
+    );
   }
 
   async click(x: number, y: number): Promise<ClickResult> {
@@ -208,6 +242,8 @@ export class ArknightsSession {
     this.ctrl = null;
     this.win = null;
     this.res = null;
+    this.frame = null;
+    this.warnedSizeMismatch = false;
   }
 
   private readResolution(): readonly [number, number] | null {

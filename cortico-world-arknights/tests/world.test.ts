@@ -13,7 +13,20 @@ import type { MaaControllerLike, MaaDesktopDevice, MaaImageJobLike, MaaJobLike, 
 import { FakeHost } from './helpers/fake-host.ts';
 
 const PACKAGE_DIR = fileURLToPath(new URL('..', import.meta.url));
-const PNG_BYTES = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+
+/** 造一个只有 IHDR 头的 PNG：尺寸能被 pngSize 读出来，够用且不必塞真实图像。 */
+function pngHeader(width: number, height: number): Uint8Array {
+  const bytes = new Uint8Array(33);
+  bytes.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a], 0);
+  bytes.set([0, 0, 0, 13], 8);
+  bytes.set([0x49, 0x48, 0x44, 0x52], 12);
+  const view = new DataView(bytes.buffer);
+  view.setUint32(16, width);
+  view.setUint32(20, height);
+  return bytes;
+}
+
+let imageBytes = pngHeader(1000, 400);
 
 function jobOf(succeeded: boolean, status = succeeded ? 1 : 0): MaaJobLike {
   const job: MaaJobLike = { succeeded, status, wait: async () => job };
@@ -60,7 +73,7 @@ class FakeController implements MaaControllerLike {
 
   post_screencap(): MaaImageJobLike {
     let self: MaaImageJobLike;
-    self = { wait: async () => self, get: () => (FakeController.emptyImage ? null : PNG_BYTES) };
+    self = { wait: async () => self, get: () => (FakeController.emptyImage ? null : imageBytes) };
     return self;
   }
 
@@ -87,15 +100,19 @@ beforeEach(() => {
   FakeController.created = [];
   FakeController.noResolution = false;
   FakeController.emptyImage = false;
+  imageBytes = pngHeader(1000, 400);
 });
 
 afterEach(() => rmSync(scratchDir, { recursive: true, force: true }));
 
-function newWorld(maa: MaaModule = fakeMaa) {
+function newWorld(maa: MaaModule = fakeMaa, warns: string[] = []) {
   const ctx = fakeWorldContext(ARKNIGHTS, { scratchDir });
-  const session = new ArknightsSession(async () => ({ ok: true, maa }));
+  const session = new ArknightsSession(
+    async () => ({ ok: true, maa }),
+    (line) => warns.push(line),
+  );
   const world = new ArknightsWorld({ cfg: ctx.cfg, timezone: ctx.timezone, session });
-  return { ctx, world, session };
+  return { ctx, world, session, warns };
 }
 
 function toolOf(world: ArknightsWorld, name: string) {
@@ -211,7 +228,7 @@ describe('明日方舟 World', () => {
     const blob = outcome.blobs![0]!;
     if (!('bytes' in blob)) throw new Error('应当是新字节形式的附件');
     expect(blob.mime).toBe('image/png');
-    expect(blob.bytes.byteLength).toBe(PNG_BYTES.byteLength);
+    expect(blob.bytes.byteLength).toBe(imageBytes.byteLength);
     expect(blob.fallbackText).toContain('1000×400');
     expect(blob.name).toMatch(/^arknights-\d{8}-\d{6}\.png$/);
   });
@@ -233,6 +250,29 @@ describe('明日方舟 World', () => {
     ctx.persist({ pauseButton: { x: 0, y: 1 } });
     await toolOf(world, 'ark_set_paused').handler({ paused: false }, call);
     expect(FakeController.clicks).toEqual([[0, 399]]);
+  });
+
+  it('帧尺寸与控制器尺寸不一致时按帧尺寸换算，且只提醒一次', async () => {
+    imageBytes = pngHeader(800, 500);
+    const { ctx, world, warns } = newWorld();
+    Object.assign(ctx.cfg, { pauseButton: { x: 0.5, y: 0.5 } });
+    await toolOf(world, 'ark_connect').handler({}, call);
+
+    // 没有帧时只能信控制器报的 1000×400
+    await toolOf(world, 'ark_set_paused').handler({ paused: true }, call);
+    expect(FakeController.clicks.at(-1)).toEqual([500, 200]);
+
+    await toolOf(world, 'ark_screencap').handler({}, call);
+    expect(warns).toHaveLength(1);
+    expect(warns[0]).toContain('800×500');
+
+    // 抓过帧以后一律按帧的 800×500 换算
+    await toolOf(world, 'ark_set_paused').handler({ paused: false }, call);
+    expect(FakeController.clicks.at(-1)).toEqual([400, 250]);
+
+    // 再抓一帧不重复刷日志
+    await toolOf(world, 'ark_screencap').handler({}, call);
+    expect(warns).toHaveLength(1);
   });
 
   it('参数不是布尔值时拒绝执行，也不发点击', async () => {

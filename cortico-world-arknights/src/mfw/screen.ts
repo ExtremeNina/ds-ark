@@ -17,6 +17,26 @@ export function toPngBytes(image: ArrayBuffer | Uint8Array | ArrayBufferView | n
   return null;
 }
 
+const PNG_SIGNATURE = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
+
+/**
+ * 从 PNG 的 IHDR 读出真实像素尺寸，不解码整张图。
+ * 用途是核对「点击换算用的分辨率」与「这一帧的实际尺寸」是否同一个坐标系。
+ */
+export function pngSize(bytes: Uint8Array | null | undefined): { width: number; height: number } | null {
+  if (!bytes || bytes.byteLength < 24) return null;
+  for (let i = 0; i < PNG_SIGNATURE.length; i += 1) {
+    if (bytes[i] !== PNG_SIGNATURE[i]) return null;
+  }
+  const type = String.fromCharCode(bytes[12]!, bytes[13]!, bytes[14]!, bytes[15]!);
+  if (type !== 'IHDR') return null;
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const width = view.getUint32(16);
+  const height = view.getUint32(20);
+  if (width === 0 || height === 0) return null;
+  return { width, height };
+}
+
 /** 附件名带上时间戳，方便在会话记录里区分不同帧。 */
 export function screenshotName(at: Date): string {
   const pad = (n: number) => String(n).padStart(2, '0');

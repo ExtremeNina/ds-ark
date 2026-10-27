@@ -1,3 +1,5 @@
 node_modules/
 *.log
 smoke-*.png
+*-before.png
+*-after.png

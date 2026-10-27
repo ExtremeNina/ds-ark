@@ -79,7 +79,8 @@ export class ArknightsWorld implements World {
   private host: WorldHost | null = null;
 
   constructor(private readonly opts: ArknightsWorldOptions) {
-    this.session = opts.session ?? new ArknightsSession();
+    // 尺寸不一致只进日志，不进模型上下文：它不是模型需要处理的决策点。
+    this.session = opts.session ?? new ArknightsSession(undefined, (line) => this.host?.log.warn(line));
   }
 
   /** 只报值；前缀文本一律来自 ENV_PROMPT.md。 */
