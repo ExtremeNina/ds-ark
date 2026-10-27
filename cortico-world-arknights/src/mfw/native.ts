@@ -57,13 +57,25 @@ function describe(error: unknown): string {
   return `加载 @maaxyz/maa-node 失败：${detail}`;
 }
 
+/**
+ * `@maaxyz/maa-node` 是 CommonJS：`module.exports = globalThis.maa`，属性是动态挂上去的，
+ * 所以 ESM 的具名导入看不见它们，`import()` 的结果里只有 `default`。这里把两种形状都接住。
+ */
+export function unwrapMaaModule(mod: unknown): MaaModule {
+  const named = mod as Partial<MaaModule> | undefined;
+  if (named && typeof named.Win32Controller === 'function') return named as MaaModule;
+  const fallback = (mod as { default?: Partial<MaaModule> } | undefined)?.default;
+  if (fallback && typeof fallback.Win32Controller === 'function') return fallback as MaaModule;
+  throw new Error('模块没有导出 Win32Controller：可能是版本不匹配，或平台原生包没装上');
+}
+
 /** 成功或失败都只算一次；失败原因被缓存，不在每次调用重试。 */
 export async function loadMaa(): Promise<MaaLoadResult> {
   if (settled) return settled;
   if (!loading) {
     loading = import('@maaxyz/maa-node').then(
       (mod) => {
-        settled = { ok: true, maa: mod as unknown as MaaModule };
+        settled = { ok: true, maa: unwrapMaaModule(mod) };
         return settled;
       },
       (error: unknown) => {
