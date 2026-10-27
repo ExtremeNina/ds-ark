@@ -17,7 +17,7 @@ Release checklist for this Cortico World extension. Contract references:
       fits, notice and warning tags included.
 - [ ] **CHANGELOG.md** has a `## <version>` section for the version being published.
 - [ ] **`os`**: stays `["win32"]`; the native dependency has no other usable controller for this use case.
-- [ ] **`files`**: ships `src`, `assets`, `README.md`, `CHANGELOG.md`, `LICENSE`, `describe.json` only.
+- [ ] **`files`**: ships `src`, `assets`, `README.md`, `BATTLE_PLAYBOOK.md`, `CHANGELOG.md`, `LICENSE`, `describe.json` only.
       `tests/` stays out of the published package, and real-machine scripts live in the repo-level
       `test/` package, never here.
 - [ ] **OCR assets**: `assets/resource/model/ocr/` must keep `det.onnx`, `rec.onnx` and `keys.txt`

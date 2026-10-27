@@ -470,6 +470,43 @@ describe('明日方舟 World', () => {
     expect(FakeController.clicks).toEqual([]);
   });
 
+  it('ark_wait 只等待，不抓帧也不点击，负值钳到 0', async () => {
+    const { world } = newWorld();
+    await toolOf(world, 'ark_connect').handler({}, call);
+    const before = FakeController.clicks.length;
+
+    const short = receipt(await toolOf(world, 'ark_wait').handler({ ms: 1 }, call));
+    expect(short.failed).toBeUndefined();
+    expect(short.text).toContain('已等待 1 毫秒');
+
+    const clamped = receipt(await toolOf(world, 'ark_wait').handler({ ms: -500 }, call));
+    expect(clamped.text).toContain('已等待 0 毫秒');
+
+    expect(FakeController.clicks).toHaveLength(before);
+  });
+
+  it('ark_wait 参数不是数字时拒绝执行', async () => {
+    const { world } = newWorld();
+    const outcome = receipt(await toolOf(world, 'ark_wait').handler({ ms: 'soon' }, call));
+    expect(outcome.failed).toBe(true);
+    expect(outcome.text).toContain('ms 必须是数字');
+  });
+
+  it('读战场：认到结算就说明本局已结束，不再报缺项', async () => {
+    writeFakeModel(scratchDir);
+    FakeTasker.entries = [
+      { text: '行动结束', box: [520, 400, 200, 60] },
+      { text: '20', box: [660, 8, 30, 26] },
+    ];
+    const { world } = newWorld();
+    await toolOf(world, 'ark_connect').handler({}, call);
+
+    const outcome = receipt(await toolOf(world, 'ark_battle_state').handler({}, call));
+    expect(outcome.failed).toBeUndefined();
+    expect(outcome.text).toContain('本局已结束');
+    expect(outcome.text).not.toContain('没读到');
+  });
+
   it('原生加载失败时工具报原因，而不是让 World 构造失败', async () => {
     const ctx = fakeWorldContext(ARKNIGHTS, { scratchDir });
     const session = new ArknightsSession(async () => ({ ok: false, error: '缺少 @maaxyz/maa-node：测试用错因' }));

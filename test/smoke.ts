@@ -3,6 +3,7 @@
  *
  *   pnpm smoke                                  只截图，不点击
  *   pnpm smoke --state                          只读：抓帧 + 识别战场数字，打印原始行与结构化结果
+ *   pnpm smoke --watch [ms]                     只读循环：每 ms（默认 3000）读一次，认到结算自动退出
  *   pnpm smoke --ocr                            只跑识别，额外打印原始识别明细（确认模型路径与返回结构）
  *   pnpm smoke --click                          点配置里的暂停坐标（默认 0.966 / 0.071）
  *   pnpm smoke --click 60,555                   按像素点一个大目标，用来判断输入是否送达
@@ -48,6 +49,40 @@ function takePoint(name: string): { x: number; y: number } | undefined {
   return { x: x as number, y: y as number };
 }
 
+/**
+ * 只读循环：每隔一段时间抓帧 + 识别一次，打印一行摘要；认到结算就退出。
+ *
+ * 它不下干员、不点暂停——「让模型自己打」靠的是 Coopanion 里的模型，
+ * 这里只用来确认「结算能不能认出来」和「读数在动」。
+ */
+async function runWatch(session: ArknightsSession, cfg: ArknightsConfigSection, intervalMs: number): Promise<void> {
+  console.log(`[watch] 每 ${intervalMs}ms 读一次，认到结算即退出，Ctrl+C 结束。只读，不点击。`);
+  for (let round = 1; ; round += 1) {
+    const shot = await session.screencap();
+    if (!shot.ok) {
+      console.log(`[watch] 第 ${round} 次抓帧失败：${shot.error}`);
+      return;
+    }
+    const ocr = await session.recognizeFrame(shot.png, cfg.resourceDir);
+    if (!ocr.ok) {
+      console.log(`[watch] 第 ${round} 次识别失败：${ocr.error}`);
+    } else {
+      const state = parseBattleState(ocr.lines);
+      const missing = missingFields(state);
+      console.log(
+        `[watch ${round}] ${state.result ?? '对局中'}｜费用 ${state.cost ?? '?'}｜生命 ${state.life ?? '?'}`
+          + `｜敌人 ${state.enemies ?? '?'}｜手牌 ${state.handCosts.length || '?'} 张`
+          + (missing.length > 0 ? `｜没读到 ${missing.join('、')}` : ''),
+      );
+      if (state.result) {
+        console.log(`[watch] 已结算：${state.result === 'victory' ? '胜利' : '失败'}`);
+        return;
+      }
+    }
+    await new Promise((resolve) => setTimeout(resolve, intervalMs));
+  }
+}
+
 async function main(): Promise<void> {
   const windowArg = take('window');
   const inputArg = take('input');
@@ -72,6 +107,7 @@ async function main(): Promise<void> {
   const ocrArg = take('ocr');
   const resourceArg = take('resource');
   const deployArg = take('deploy');
+  const watchArg = take('watch');
 
   if (deployArg !== undefined && typeof deployArg !== 'string') {
     console.error('--deploy 需要 "手牌x,手牌y,地块x,地块y,朝向"，例如 --deploy 0.1,0.9,0.5,0.5,up');
@@ -121,6 +157,14 @@ async function main(): Promise<void> {
   console.log(`窗口：「${connected.window.windowName}」（类名 ${connected.window.className}）`);
   console.log(`控制器报告的尺寸：${reported ? `${reported[0]}×${reported[1]}` : '未报告'}`);
   console.log(`点击换算用的尺寸：${width}×${height}`);
+
+  if (watchArg !== undefined) {
+    const watchMs = typeof watchArg === 'string' ? Number(watchArg) : Number.NaN;
+    const interval = Number.isFinite(watchMs) && watchMs >= 500 ? Math.min(watchMs, 30_000) : 3000;
+    await runWatch(session, cfg, interval);
+    await session.stop();
+    return;
+  }
 
   const before = await session.screencap();
   if (!before.ok) {

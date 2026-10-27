@@ -35,13 +35,17 @@ export const ARKNIGHTS: WorldDefinition<ArknightsConfigSection> = {
         zh: '把手牌拖到战场地块并拖出朝向；回执只说明拖拽已发出，落位与否由画面判断。',
         en: 'Drags one hand card onto a battlefield tile and sets the facing; the receipt only states that the drags were sent.',
       },
+      ark_wait: {
+        zh: '等待若干毫秒（最多 10 秒），用于等费用回复；不截图、不点击。',
+        en: 'Waits up to 10 seconds for DP to regenerate; captures and clicks nothing.',
+      },
     }),
     events: [
       {
         type: 'arknights.ready',
         description: {
-          zh: 'World 挂载完成，五个工具可用；此时尚未连接游戏窗口。',
-          en: 'The World was mounted and its five tools are available; the game window is not connected yet.',
+          zh: 'World 挂载完成，六个工具可用；此时尚未连接游戏窗口。',
+          en: 'The World was mounted and its six tools are available; the game window is not connected yet.',
         },
       },
     ],

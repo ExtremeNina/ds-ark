@@ -104,9 +104,28 @@ describe('战场状态解析', () => {
     expect(parseBattleState([cost('1 2 8')]).cost).toBe(128);
   });
 
+  it('结算横幅能认出来：行动结束=胜利，作战失败=失败，同帧两种字样按失败算', () => {
+    expect(parseBattleState([line('行动结束', 0.4, 0.65, 0.1, 0.05)]).result).toBe('victory');
+    expect(parseBattleState([line('作战失败', 0.4, 0.65, 0.1, 0.05)]).result).toBe('defeat');
+    expect(parseBattleState([line('MISSION ACCOMPLISHED', 0.3, 0.5, 0.3, 0.05)]).result).toBe('victory');
+    expect(
+      parseBattleState([line('作战失败', 0.4, 0.65), line('行动结束', 0.4, 0.55)]).result,
+    ).toBe('defeat');
+  });
+
+  it('对局中 result 为 null，结算后回执不再报缺项', () => {
+    const playing = parseBattleState([line('20', 0.52, 0.02, 0.03)]);
+    expect(playing.result).toBeNull();
+    expect(describeBattleState(playing)).toContain('没读到');
+
+    const finished = parseBattleState([line('行动结束', 0.4, 0.65, 0.1, 0.05)]);
+    expect(describeBattleState(finished)).toContain('本局已结束');
+    expect(describeBattleState(finished)).not.toContain('没读到');
+  });
+
   it('空结果不编数字', () => {
     const state = parseBattleState([]);
-    expect(state).toEqual({ cost: null, life: null, enemies: null, paused: null, handCosts: [] });
+    expect(state).toEqual({ cost: null, life: null, enemies: null, paused: null, handCosts: [], result: null });
     expect(missingFields(state)).toEqual(['费用', '生命值', '剩余敌人', '手牌费用']);
   });
 

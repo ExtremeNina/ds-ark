@@ -122,6 +122,22 @@ export const ARKNIGHTS_TOOL_DECLS: ReadonlyArray<ToolSpec> = [
       required: ['card', 'tile', 'direction'],
     },
   },
+  {
+    name: 'ark_wait',
+    description:
+      'Wait a number of milliseconds before doing anything else, e.g. to let deployment points regenerate. '
+      + 'It neither captures nor clicks; prefer it over burning several screenshot calls just to pass time. '
+      + 'The value is clamped to 0-10000 ms.',
+    tags: ['read'],
+    parameters: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        ms: { type: 'number', description: 'How long to wait, 0-10000 milliseconds.' },
+      },
+      required: ['ms'],
+    },
+  },
 ];
 
 const fail = (text: string): ToolOutcome => ({ text, failed: true });
@@ -164,6 +180,8 @@ export class ArknightsWorld implements World {
           return { ...decl, handler: () => this.battleState() };
         case 'ark_deploy':
           return { ...decl, handler: (args) => this.deploy(args) };
+        case 'ark_wait':
+          return { ...decl, handler: (args) => this.wait(args) };
         default:
           return { ...decl, handler: async () => fail(`未实现的工具：${decl.name}`) };
       }
@@ -194,7 +212,7 @@ export class ArknightsWorld implements World {
       source: this.id,
       origin: 'internal',
       senderKey: this.id,
-      text: '明日方舟 World 已挂载。ark_connect / ark_screencap / ark_set_paused / ark_battle_state / ark_deploy 可用；'
+      text: '明日方舟 World 已挂载。ark_connect / ark_screencap / ark_set_paused / ark_battle_state / ark_deploy / ark_wait 可用；'
         + '尚未连接游戏窗口。OCR 模型随包提供（resourceDir 仅用于覆盖），点击与拖拽都只保证「手势已发出」。',
     });
   }
@@ -323,5 +341,14 @@ export class ArknightsWorld implements World {
         + 'World 自己不做识别，也不会替你下结论。',
       blobs: [frameBlob(after.png, fallbackText)],
     };
+  }
+
+  /** 只睡不动作：给模型一个「等回费」的廉价手段，比反复截图省 token。 */
+  private async wait(args: Record<string, unknown>): Promise<ToolOutcome | string> {
+    const raw = args.ms;
+    if (typeof raw !== 'number' || !Number.isFinite(raw)) return fail('参数 ms 必须是数字（毫秒）。');
+    const ms = Math.max(0, Math.min(10_000, Math.round(raw)));
+    await new Promise((resolve) => setTimeout(resolve, ms));
+    return `已等待 ${ms} 毫秒。现在可以再调用 ark_battle_state 看状态，或继续 ark_deploy。`;
   }
 }

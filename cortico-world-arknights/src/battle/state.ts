@@ -9,6 +9,9 @@
 import type { OcrLine } from '../mfw/ocr.ts';
 import { regionOf } from './regions.ts';
 
+/** 结算画面：`null` 表示没认到结算文字（**不等于**还在对局中）。 */
+export type BattleResult = 'victory' | 'defeat';
+
 export interface BattleState {
   readonly cost: number | null;
   readonly life: number | null;
@@ -16,6 +19,8 @@ export interface BattleState {
   /** 只表示「认到/没认到暂停横幅」，没认到不等于未暂停。 */
   readonly paused: boolean | null;
   readonly handCosts: ReadonlyArray<{ readonly cost: number; readonly x: number }>;
+  /** 认到的结算结果；对局中为 `null`。 */
+  readonly result: BattleResult | null;
 }
 
 /** 纯数字（允许中间有空格，OCR 常把三位数拆成「1 2」）。 */
@@ -24,6 +29,21 @@ const INTEGER = /^\d+$/;
 const RATIO = /^(\d+)\/(\d+)$/;
 /** 暂停横幅上的字：PAUSE 可能被认成 PAUS/PAUSF，中文则是「暂停中」。 */
 const PAUSE_BANNER = /paus|暂停/i;
+/**
+ * 结算横幅：失败先判，避免同一帧里两种字样都出现时误报胜利。
+ * 国服胜利是「行动结束」、失败是「作战失败」；英文客户端是 MISSION ACCOMPLISHED / FAILED。
+ */
+const RESULT_WORDS: ReadonlyArray<{ readonly result: BattleResult; readonly pattern: RegExp }> = [
+  { result: 'defeat', pattern: /作战失败|行动失败|MISSION\s*FAILED/i },
+  { result: 'victory', pattern: /行动结束|作战胜利|MISSION\s*ACCOMPLISHED/i },
+];
+
+function matchResult(text: string): BattleResult | null {
+  for (const entry of RESULT_WORDS) {
+    if (entry.pattern.test(text)) return entry.result;
+  }
+  return null;
+}
 /** 只含数字与常见误识字符：0↔O/o、1↔I/l/|，外加分隔用的斜杠。 */
 const DIGIT_LIKE = /^[0-9OoIl|/]+$/;
 /** 手牌卡费：最多两个非数字前缀（卡面图标被认成字母，如 `N16`），后面接 1~2 位数字。 */
@@ -125,11 +145,17 @@ export function parseBattleState(lines: readonly OcrLine[]): BattleState {
   let life: number | null = null;
   let enemies: string | null = null;
   let paused: boolean | null = null;
+  let result: BattleResult | null = null;
   const handCandidates: HandCandidate[] = [];
 
   for (const line of lines) {
     const text = line.text.trim();
     if (!text) continue;
+
+    // 结算横幅可能出现在画面中部（`unknown` 区），所以先按整句文字判一次，再按区域归类。
+    if (result === null) {
+      result = matchResult(text);
+    }
 
     switch (regionOf(line.box)) {
       case 'banner':
@@ -166,7 +192,7 @@ export function parseBattleState(lines: readonly OcrLine[]): BattleState {
 
   const handCosts = dedupeByX(keepHandRow(handCandidates))
     .map(({ cost: value, x }) => ({ cost: value, x }));
-  return { cost, life, enemies, paused, handCosts };
+  return { cost, life, enemies, paused, handCosts, result };
 }
 
 /** 读不到的项，用中文列出来，供回执如实说明。 */
@@ -189,14 +215,20 @@ export function describeBattleState(state: BattleState): string {
     known.push(`手牌费用从左到右 ${state.handCosts.map((card) => card.cost).join(' / ')}`);
   }
 
-  const parts = [known.length > 0 ? `识别到：${known.join('，')}。` : '这一帧没有识别出任何数字。'];
-  parts.push(
-    state.paused === true
-      ? '画面里有暂停横幅（PAUSE / 暂停中）。'
-      : '没有识别到暂停横幅，但这不代表游戏没有暂停。',
-  );
-  const missing = missingFields(state);
-  if (missing.length > 0) parts.push(`没读到：${missing.join('、')}。`);
+  const parts: string[] = [];
+  if (state.result === 'victory') parts.push('画面显示本局已结束（行动结束／胜利）。');
+  if (state.result === 'defeat') parts.push('画面显示本局失败（作战失败）。');
+  parts.push(known.length > 0 ? `识别到：${known.join('，')}。` : '这一帧没有识别出任何数字。');
+  if (state.result === null) {
+    parts.push(
+      state.paused === true
+        ? '画面里有暂停横幅（PAUSE / 暂停中）。'
+        : '没有识别到暂停横幅，但这不代表游戏没有暂停。',
+    );
+    // 已结算时费用/手牌都没有意义，继续报「没读到」只会误导。
+    const missing = missingFields(state);
+    if (missing.length > 0) parts.push(`没读到：${missing.join('、')}。`);
+  }
   parts.push('这些数字来自本机 OCR，可能有误，请以附件画面为准。');
   return parts.join('');
 }
