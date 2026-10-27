@@ -1,0 +1,79 @@
+{
+  "tools": [
+    {
+      "name": "ark_connect",
+      "description": "Find the Arknights PC client window on this machine and connect to it. Returns the window title, class name and capture resolution, or the reason it failed. Call this before any other ark_ tool; calling it again re-uses a live connection.",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {},
+        "required": []
+      },
+      "tags": [
+        "read"
+      ],
+      "summary": {
+        "zh": "枚举本机窗口，按窗口名关键字找到明日方舟 PC 客户端并建立连接。",
+        "en": "Enumerates local windows and connects to the Arknights PC client matched by window title."
+      }
+    },
+    {
+      "name": "ark_screencap",
+      "description": "Capture the current frame of the connected Arknights window and attach it as a PNG image. Returns the frame size and byte count; the image is only attached when the endpoint accepts image/png.",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {},
+        "required": []
+      },
+      "tags": [
+        "read"
+      ],
+      "summary": {
+        "zh": "抓取当前一帧游戏画面，作为 PNG 附件随回执交给模型。",
+        "en": "Captures the current frame of the game and attaches it as a PNG image."
+      }
+    },
+    {
+      "name": "ark_set_paused",
+      "description": "Click the configured pause button position once to pause (true) or resume (false) the battle. The receipt only states that a click was sent; it cannot confirm the game state.",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "paused": {
+            "type": "boolean",
+            "description": "true sends a pause click, false sends a resume click."
+          }
+        },
+        "required": [
+          "paused"
+        ]
+      },
+      "tags": [
+        "act"
+      ],
+      "summary": {
+        "zh": "向配置的暂停按钮位置发一次点击，暂停或继续战斗。",
+        "en": "Sends one click to the configured pause button to pause or resume the battle."
+      }
+    }
+  ],
+  "events": [
+    {
+      "type": "arknights.ready",
+      "description": {
+        "zh": "World 挂载完成，三个工具可用；此时尚未连接游戏窗口。",
+        "en": "The World was mounted and its three tools are available; the game window is not connected yet."
+      }
+    }
+  ],
+  "prompts": [
+    {
+      "key": "worlds.arknights.envPrompt",
+      "title": "明日方舟 · 环境提示词",
+      "role": "envPrompt",
+      "content": "明日方舟 PC 客户端是本机一个可以被截屏、被点击的窗口（当前匹配关键字：{{arknights.windowMatch}}）。使用时机与约束：\n\n- 任何操作前先调用一次 ark_connect。它没成功时先确认游戏是否已经启动、窗口标题是否与上面的关键字相符，再决定是否让用户改配置；不要连续重试同一个调用。\n- 需要看画面时才调用 ark_screencap。每次只取当前一帧，不要连拍轮询：连续截图既不会得到更新的战场信息，也会白白占掉上下文。\n- 要让游戏停住或继续时调用 ark_set_paused，传 true 停、传 false 继续。它只保证「向配置的那个坐标发了一次点击」，无法确认游戏是否真的暂停；需要确认就再截一帧自己看。\n- 本版没有识别能力：读不出费用、手牌、生命值、关卡名和干员位置。不要向用户报告这些数值，用户问起战况时如实说这一版看不到，也不要凭画面里的文字猜。\n- 只操作明日方舟窗口。用户想换分辨率时不必重新校准，坐标按比例缩放，改配置里的两个比例值即可。\n"
+    }
+  ]
+}

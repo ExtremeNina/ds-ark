@@ -1,0 +1,49 @@
+{
+  "name": "cortico-world-arknights",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Arknights PC client World for Coopanion: find the window, capture the screen, pause and resume",
+  "license": "MIT",
+  "keywords": [
+    "cortico-world",
+    "cortico",
+    "arknights"
+  ],
+  "os": [
+    "win32"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "packageManager": "pnpm@11.28.6",
+  "main": "./src/index.ts",
+  "cortico": {
+    "kind": "world",
+    "api": 6,
+    "displayName": "明日方舟",
+    "describe": "describe.json",
+    "tags": []
+  },
+  "files": [
+    "src",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE",
+    "describe.json"
+  ],
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "smoke": "tsx scripts/smoke.ts"
+  },
+  "dependencies": {
+    "@maaxyz/maa-node": "5.14.3"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "cortico": "^0.2.8",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  }
+}
