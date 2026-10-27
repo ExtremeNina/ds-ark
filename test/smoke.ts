@@ -2,9 +2,9 @@
  * 真机冒烟：绕开 Coopanion，直接验「窗口枚举 → 截图 → 点击」这条链路。
  *
  *   pnpm smoke                                  只截图，不点击
- *   pnpm smoke --click                          点配置里的暂停坐标（默认 0.97 / 0.06）
+ *   pnpm smoke --click                          点配置里的暂停坐标（默认 0.966 / 0.071）
  *   pnpm smoke --click 60,555                   按像素点一个大目标，用来判断输入是否送达
- *   pnpm smoke --click --input AnchoredTouch    换输入方式
+ *   pnpm smoke --click --input SendMessage      换输入方式（默认 AnchoredTouch）
  *   pnpm smoke --click --pause 0.966,0.071      现场校准暂停坐标（当前默认值）
  *   pnpm smoke --window "明日方舟" --shot trial 指定窗口关键字与输出前缀
  *

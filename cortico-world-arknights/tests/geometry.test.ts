@@ -21,6 +21,14 @@ describe('画面比例判定', () => {
     expect(is16by9(0, 720)).toBe(false);
     expect(is16by9(Number.NaN, 720)).toBe(false);
   });
+
+  it('容差边界：720p 下 1266~1294 命中，再往外判否', () => {
+    // 容差 0.02 对应宽度 1265.6 ~ 1294.4，两侧各留一格取整误差
+    expect(is16by9(1266, 720)).toBe(true);
+    expect(is16by9(1294, 720)).toBe(true);
+    expect(is16by9(1265, 720)).toBe(false);
+    expect(is16by9(1295, 720)).toBe(false);
+  });
 });
 
 describe('归一化坐标换算', () => {

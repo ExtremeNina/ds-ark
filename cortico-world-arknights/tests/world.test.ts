@@ -277,7 +277,7 @@ describe('明日方舟 World', () => {
     const outcome = receipt(await toolOf(world, 'ark_set_paused').handler({ paused: true }, call));
     expect(outcome.failed).toBeUndefined();
     expect(outcome.blobs).toBeUndefined();
-    expect(outcome.text).toContain('补拍点击后的画面失败');
+    expect(outcome.text).toContain('补拍失败');
     expect(FakeController.clicks).toHaveLength(1);
   });
 

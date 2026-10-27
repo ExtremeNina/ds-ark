@@ -59,7 +59,7 @@ export class ArknightsSession {
   private ctrl: MaaControllerLike | null = null;
   private win: WindowInfo | null = null;
   /** 最近一帧的真实像素尺寸；点击换算以它为准。 */
-  private frame: { width: number; height: number } | null = null;
+  private lastFrameSize: { width: number; height: number } | null = null;
   private warnedSizeMismatch = false;
   private warnedAspect = false;
 
@@ -85,7 +85,7 @@ export class ArknightsSession {
    * 有帧以后一律用帧的真实像素尺寸：控制器报的尺寸与实际画面可能不是同一个坐标系。
    */
   get resolution(): readonly [number, number] | null {
-    if (this.frame) return [this.frame.width, this.frame.height];
+    if (this.lastFrameSize) return [this.lastFrameSize.width, this.lastFrameSize.height];
     return this.readResolution();
   }
 
@@ -221,7 +221,7 @@ export class ArknightsSession {
   private recordFrame(png: Uint8Array): void {
     const size = pngSize(png);
     if (!size) return;
-    this.frame = size;
+    this.lastFrameSize = size;
     this.checkSizeMismatch(size);
     this.checkAspect(size);
   }
@@ -243,7 +243,7 @@ export class ArknightsSession {
     this.warnedAspect = true;
     this.warn(
       `当前画面 ${size.width}×${size.height} 不是 16:9，而暂停坐标是按 16:9 标定的，ark_set_paused 可能点偏。`
-        + '请把窗口改回 16:9 后重启对话，或按 README 的步骤重新标定 pauseButton。',
+        + '请把窗口改回 16:9 后重启扩展（重新连接会清掉这条标记），或按 README 的步骤重新标定 pauseButton。',
     );
   }
 
@@ -265,7 +265,7 @@ export class ArknightsSession {
     destroyQuietly(this.ctrl);
     this.ctrl = null;
     this.win = null;
-    this.frame = null;
+    this.lastFrameSize = null;
     this.warnedSizeMismatch = false;
     this.warnedAspect = false;
   }

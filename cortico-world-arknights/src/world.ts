@@ -73,6 +73,11 @@ export const ARKNIGHTS_TOOL_DECLS: ReadonlyArray<ToolSpec> = [
 
 const fail = (text: string): ToolOutcome => ({ text, failed: true });
 
+/** 一帧的附件形状只在这里拼一次：mime、带时间戳的文件名、端点不收图时的降级文案。 */
+function frameBlob(png: Uint8Array, fallbackText: string): NonNullable<ToolOutcome['blobs']>[number] {
+  return { bytes: png, mime: SCREENSHOT_MIME, name: screenshotName(new Date()), fallbackText };
+}
+
 export class ArknightsWorld implements World {
   readonly id = 'arknights';
 
@@ -149,19 +154,12 @@ export class ArknightsWorld implements World {
   private async screencap(): Promise<ToolOutcome> {
     const result = await this.session.screencap();
     if (!result.ok) return fail(result.error);
-    const at = new Date();
     const size = this.session.resolution;
     const label = size ? `${size[0]}×${size[1]}` : '尺寸未知';
+    const fallbackText = `明日方舟当前帧，${label}，PNG ${result.png.byteLength} 字节（端点不接受图片时只发送这句）。`;
     return {
       text: `已抓取一帧，${label}，PNG ${result.png.byteLength} 字节。这是本次调用时刻的画面，不保证与之后的状态一致。`,
-      blobs: [
-        {
-          bytes: result.png,
-          mime: SCREENSHOT_MIME,
-          name: screenshotName(at),
-          fallbackText: `明日方舟当前帧，${label}，PNG ${result.png.byteLength} 字节（端点不接受图片时只发送这句）。`,
-        },
-      ],
+      blobs: [frameBlob(result.png, fallbackText)],
     };
   }
 
@@ -194,22 +192,15 @@ export class ArknightsWorld implements World {
     // 补拍一帧：让模型直接用眼睛判断，而不是相信坐标或回执文字。
     const after = await this.session.screencap();
     if (!after.ok) {
-      return `${receipt}补拍点击后的画面失败（${after.error}），因此无法提供对照，请自行确认游戏状态。`;
+      return `${receipt}补拍失败（${after.error}），无法提供点击后的画面，请自行确认游戏状态。`;
     }
-    const at = new Date();
     // 补拍会把帧尺寸刷新到最新值；附件说明用刷新后的尺寸，避免和画面本身对不上。
     const afterSize = this.session.resolution ?? [width, height];
+    const fallbackText = `${action}点击后的一帧，${afterSize[0]}×${afterSize[1]}，PNG ${after.png.byteLength} 字节`
+      + '（端点不接受图片时只发送这句，请再调用 ark_screencap 确认）。';
     return {
       text: `${receipt}附件是点击之后抓的一帧，请据此判断是否真的${action}；World 自己不做识别，也不会替你下结论。`,
-      blobs: [
-        {
-          bytes: after.png,
-          mime: SCREENSHOT_MIME,
-          name: screenshotName(at),
-          fallbackText: `${action}点击后的一帧，${afterSize[0]}×${afterSize[1]}，PNG ${after.png.byteLength} 字节`
-            + '（端点不接受图片时只发送这句，请再调用 ark_screencap 确认）。',
-        },
-      ],
+      blobs: [frameBlob(after.png, fallbackText)],
     };
   }
 }
