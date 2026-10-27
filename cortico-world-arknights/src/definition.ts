@@ -39,13 +39,25 @@ export const ARKNIGHTS: WorldDefinition<ArknightsConfigSection> = {
         zh: '等待若干毫秒（最多 10 秒），用于等费用回复；不截图、不点击。',
         en: 'Waits up to 10 seconds for DP to regenerate; captures and clicks nothing.',
       },
+      ark_click: {
+        zh: '向指定的归一化坐标发一次点击；只说明已发送，界面有没有变化由模型再读屏确认。',
+        en: 'Clicks one normalised point; the receipt states only that it was sent.',
+      },
+      ark_swipe: {
+        zh: '从一点拖到另一点（归一化坐标），用于滚动列表或拖动；不确认结果。',
+        en: 'Drags between two normalised points, e.g. to scroll a list; the receipt states only that it was sent.',
+      },
+      ark_ocr: {
+        zh: '抓帧并列出画面里所有识别到的文字与归一化坐标，用来定位按钮；只读，不点击。',
+        en: 'Captures the frame and lists every recognised text line with normalised boxes; read-only.',
+      },
     }),
     events: [
       {
         type: 'arknights.ready',
         description: {
-          zh: 'World 挂载完成，六个工具可用；此时尚未连接游戏窗口。',
-          en: 'The World was mounted and its six tools are available; the game window is not connected yet.',
+          zh: 'World 挂载完成，九个工具可用；此时尚未连接游戏窗口。',
+          en: 'The World was mounted and its nine tools are available; the game window is not connected yet.',
         },
       },
     ],

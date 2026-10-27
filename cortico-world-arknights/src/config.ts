@@ -54,6 +54,8 @@ export interface ArknightsConfigSection {
   deployGapMs: number;
   /** 第二步（地块 → 朝向）拖拽的时长，毫秒。 */
   deployDirectionMs: number;
+  /** 可选：推荐给模型的关卡清单，逗号分隔（如 `1-7,CE-5`）。留空则由模型自行选关。 */
+  easyStages: string;
 }
 
 export const ARKNIGHTS_DEFAULTS: ArknightsConfigSection = {
@@ -72,6 +74,8 @@ export const ARKNIGHTS_DEFAULTS: ArknightsConfigSection = {
   deployHoldMs: 260,
   deployGapMs: 0,
   deployDirectionMs: 160,
+  // 留空表示不限定：模型自己按画面挑关，并在动手前跟用户确认。
+  easyStages: '',
 };
 
 /** 配置组的路径必须全部落在 `worlds.arknights.` 段内，且在 `defaults()` 里有对应项。 */
@@ -155,6 +159,14 @@ export const ARKNIGHTS_CONFIG_GROUP: ConfigGroup = {
         description: '拖出朝向那一步的时长。默认 160，漂移或方向没选中时试 250。范围 80~5000。',
         minimum: 80,
         maximum: 5000,
+        'x-hot': true,
+      },
+      'worlds.arknights.easyStages': {
+        type: 'string',
+        title: '推荐关卡清单（可选）',
+        description:
+          '逗号分隔的关卡名，如「1-7,CE-5」。模型接「随便打几关」这类指令时优先从这份清单里挑，'
+          + '少一些瞎猜；留空则由模型自己按画面判断，并在动手前跟你确认。',
         'x-hot': true,
       },
       'worlds.arknights.resourceDir': {

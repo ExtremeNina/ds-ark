@@ -770,4 +770,139 @@ describe('明日方舟 World', () => {
       proto.post_swipe = original;
     }
   });
+
+  it('ark_click：按归一化坐标点一次，回执只说明已发送', async () => {
+    const { ctx, world } = newWorld();
+    Object.assign(ctx.cfg, { verifyAfterClick: false });
+    await toolOf(world, 'ark_connect').handler({}, call);
+
+    const outcome = receipt(await toolOf(world, 'ark_click').handler({ x: 0.5, y: 0.25 }, call));
+    expect(outcome.failed).toBeUndefined();
+    expect(FakeController.clicks).toEqual([[640, 180]]);
+    expect(outcome.text).toContain('已向 (640, 180) 发送一次点击');
+    expect(outcome.text).not.toContain('已进入');
+  });
+
+  it('ark_click：坐标越界或未连接时不发点击', async () => {
+    const { world } = newWorld();
+    const offline = receipt(await toolOf(world, 'ark_click').handler({ x: 0.5, y: 0.5 }, call));
+    expect(offline.failed).toBe(true);
+    expect(offline.text).toContain('ark_connect');
+
+    await toolOf(world, 'ark_connect').handler({}, call);
+    const bad = receipt(await toolOf(world, 'ark_click').handler({ x: 1.5, y: 0.5 }, call));
+    expect(bad.failed).toBe(true);
+    expect(FakeController.clicks).toEqual([]);
+  });
+
+  it('ark_swipe：时长夹到下限后交给控制器，两端重合时完全不发', async () => {
+    const { ctx, world } = newWorld();
+    Object.assign(ctx.cfg, { verifyAfterClick: false });
+    await toolOf(world, 'ark_connect').handler({}, call);
+
+    const outcome = receipt(await toolOf(world, 'ark_swipe').handler(
+      { from: { x: 0.5, y: 0.8 }, to: { x: 0.5, y: 0.4 }, durationMs: 10 },
+      call,
+    ));
+    expect(outcome.failed).toBeUndefined();
+    expect(FakeController.swipes).toEqual([{ from: [640, 575], to: [640, 288], duration: 80 }]);
+
+    const same = receipt(await toolOf(world, 'ark_swipe').handler(
+      { from: { x: 0.5, y: 0.5 }, to: { x: 0.5, y: 0.5 } },
+      call,
+    ));
+    expect(same.failed).toBe(true);
+    expect(FakeController.swipes).toHaveLength(1);
+  });
+
+  it('ark_ocr：列出所有文字并按从上到下排序，不点击', async () => {
+    writeFakeModel(scratchDir);
+    FakeTasker.entries = [
+      { text: '开始行动', box: [980, 640, 180, 50] },
+      { text: '1-7', box: [300, 420, 60, 30] },
+      { text: '终端', box: [80, 120, 90, 40] },
+    ];
+    const { world } = newWorld();
+    await toolOf(world, 'ark_connect').handler({}, call);
+
+    const outcome = receipt(await toolOf(world, 'ark_ocr').handler({}, call));
+    expect(outcome.failed).toBeUndefined();
+    expect(outcome.text).toContain('识别到 3 行');
+    const terminal = outcome.text.indexOf('终端');
+    const stage = outcome.text.indexOf('1-7');
+    const start = outcome.text.indexOf('开始行动');
+    expect(terminal).toBeGreaterThan(-1);
+    expect(terminal).toBeLessThan(stage);
+    expect(stage).toBeLessThan(start);
+    expect(FakeController.clicks).toEqual([]);
+  });
+
+  it('ark_ocr：maxLines 生效，并说明还有多少行没列', async () => {
+    writeFakeModel(scratchDir);
+    FakeTasker.entries = [
+      { text: 'A', box: [10, 10, 20, 10] },
+      { text: 'B', box: [10, 40, 20, 10] },
+    ];
+    const { world } = newWorld();
+    await toolOf(world, 'ark_connect').handler({}, call);
+
+    const outcome = receipt(await toolOf(world, 'ark_ocr').handler({ maxLines: 1 }, call));
+    expect(outcome.text).toContain('共 2 行');
+    expect(outcome.text).toContain('只列前 1 行');
+  });
+
+  it('ark_ocr：没有可用模型时降级为给图，不报失败', async () => {
+    const { world } = newWorld();
+    await toolOf(world, 'ark_connect').handler({}, call);
+
+    const outcome = receipt(await toolOf(world, 'ark_ocr').handler({}, call));
+    expect(outcome.failed).toBeUndefined();
+    expect(outcome.text).toContain('读屏失败');
+    expect(outcome.blobs).toHaveLength(1);
+  });
+
+  it('ark_swipe：repeats 让同一段拖拽连发多次', async () => {
+    const { ctx, world } = newWorld();
+    Object.assign(ctx.cfg, { verifyAfterClick: false });
+    await toolOf(world, 'ark_connect').handler({}, call);
+
+    const outcome = receipt(await toolOf(world, 'ark_swipe').handler(
+      { from: { x: 0.5, y: 0.8 }, to: { x: 0.5, y: 0.4 }, repeats: 3, intervalMs: 0 },
+      call,
+    ));
+    expect(outcome.failed).toBeUndefined();
+    expect(FakeController.swipes).toHaveLength(3);
+    expect(outcome.text).toContain('连续 3 次');
+  });
+
+  it('ark_click：给了 expect 就轮询文字，同帧命中立刻回报', async () => {
+    writeFakeModel(scratchDir);
+    FakeTasker.entries = [{ text: '关卡列表', box: [100, 100, 200, 40] }];
+    const { ctx, world } = newWorld();
+    Object.assign(ctx.cfg, { verifyAfterClick: false });
+    await toolOf(world, 'ark_connect').handler({}, call);
+
+    const outcome = receipt(await toolOf(world, 'ark_click').handler(
+      { x: 0.5, y: 0.5, expect: '关卡列表', timeoutMs: 500 },
+      call,
+    ));
+    expect(outcome.failed).toBeUndefined();
+    expect(outcome.text).toContain('出现了「关卡列表」');
+    expect(FakeController.clicks).toHaveLength(1);
+  });
+
+  it('ark_click：expect 始终没出现时如实说没读到，不推断点击失败', async () => {
+    writeFakeModel(scratchDir);
+    FakeTasker.entries = [{ text: '主页', box: [100, 100, 200, 40] }];
+    const { ctx, world } = newWorld();
+    Object.assign(ctx.cfg, { verifyAfterClick: false });
+    await toolOf(world, 'ark_connect').handler({}, call);
+
+    const outcome = receipt(await toolOf(world, 'ark_click').handler(
+      { x: 0.5, y: 0.5, expect: '关卡列表', timeoutMs: 500 },
+      call,
+    ));
+    expect(outcome.text).toContain('没在画面里读到「关卡列表」');
+    expect(outcome.text).toContain('不代表点击一定没生效');
+  });
 });

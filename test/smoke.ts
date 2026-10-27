@@ -10,6 +10,9 @@
  *   pnpm smoke --auto --auto-attempts 5         每步最多试几个地块（默认 3）
  *   pnpm smoke --auto --auto-time 900           整体时间上限，秒（默认 600）
  *   pnpm smoke --deploy ... --hold 600 --gap 150 --dir 250   临时改部署时序（毫秒），不写进配置
+ *   pnpm smoke --ocr-all                        读全屏文字与坐标（导航用），不点击
+ *   pnpm smoke --click-at "0.12,0.90"           按归一化坐标点一次
+ *   pnpm smoke --swipe "0.5,0.8,0.5,0.4,400"    从一点拖到另一点（可选时长）
  *   pnpm smoke --ocr                            只跑识别，额外打印原始识别明细（确认模型路径与返回结构）
  *   pnpm smoke --click                          点配置里的暂停坐标（默认 0.966 / 0.071）
  *   pnpm smoke --click 60,555                   按像素点一个大目标，用来判断输入是否送达
@@ -24,6 +27,7 @@
  */
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { planClick, planSwipe } from '../cortico-world-arknights/src/battle/actions.ts';
 import { DEPLOY_DIRECTIONS, planDeploy } from '../cortico-world-arknights/src/battle/deploy.ts';
 import { regionOf } from '../cortico-world-arknights/src/battle/regions.ts';
 import { describeBattleState, missingFields, parseBattleState } from '../cortico-world-arknights/src/battle/state.ts';
@@ -300,6 +304,9 @@ async function main(): Promise<void> {
   const ocrArg = take('ocr');
   const resourceArg = take('resource');
   const deployArg = take('deploy');
+  const ocrAllArg = take('ocr-all');
+  const clickAtArg = take('click-at');
+  const swipeArg = take('swipe');
   const watchArg = take('watch');
   const autoArg = take('auto');
   const autoTilesArg = take('auto-tiles');
@@ -424,10 +431,59 @@ async function main(): Promise<void> {
   const wantsClick = clickArg !== undefined || pixelTarget !== undefined;
   const wantsOcr = stateArg !== undefined || ocrArg !== undefined;
 
-  if (!wantsClick && !wantsOcr && deployArg === undefined) {
-    console.log('未发送点击。要试点击：pnpm smoke --click；要读战场：pnpm smoke --state');
+  const wantsAction = deployArg !== undefined || clickAtArg !== undefined || swipeArg !== undefined || ocrAllArg !== undefined;
+  if (!wantsClick && !wantsOcr && !wantsAction) {
+    console.log('未发送点击。要试点击：pnpm smoke --click；要读战场：pnpm smoke --state；'
+      + '要看全屏文字：pnpm smoke --ocr-all');
     await session.stop();
     return;
+  }
+
+  if (ocrAllArg !== undefined) {
+    const ocr = await session.recognizeFrame(before.png, cfg.resourceDir);
+    if (!ocr.ok) {
+      console.log(`[ocr-all] 识别失败：${ocr.error}`);
+    } else {
+      const lines = [...ocr.lines].sort((a, b) => a.box.y - b.box.y || a.box.x - b.box.x);
+      console.log(`[ocr-all] 共 ${lines.length} 行（归一化 x,y,w,h　像素 x,y,w,h）：`);
+      for (const line of lines) {
+        const { x, y, w, h } = line.box;
+        const px = `${Math.round(x * frameSize[0])},${Math.round(y * frameSize[1])},`
+          + `${Math.round(w * frameSize[0])},${Math.round(h * frameSize[1])}`;
+        console.log(`  「${line.text}」 ${x.toFixed(3)},${y.toFixed(3)} ${w.toFixed(3)},${h.toFixed(3)}　像素 ${px}`);
+      }
+    }
+  }
+
+  if (typeof clickAtArg === 'string') {
+    const [x, y] = clickAtArg.split(',').map((part) => Number(part.trim()));
+    const planned = planClick({ x, y }, frameSize);
+    if (!planned.ok) {
+      console.error(planned.error);
+      process.exitCode = 2;
+    } else {
+      const { at } = planned.plan;
+      console.log(`[click-at] 目标 (${at.x}, ${at.y})　归一化 ${String(x)},${String(y)}（画面 ${frameSize[0]}×${frameSize[1]}）`);
+      const clicked = await session.click(at.x, at.y);
+      console.log(clicked.ok ? '控制器回执：点击已发送' : clicked.error);
+      if (!clicked.ok) process.exitCode = 1;
+    }
+  }
+
+  if (typeof swipeArg === 'string') {
+    const parts = swipeArg.split(',').map((part) => Number(part.trim()));
+    const [x1, y1, x2, y2, ms] = parts;
+    const planned = planSwipe({ x: x1, y: y1 }, { x: x2, y: y2 }, parts.length > 4 ? ms : undefined, frameSize);
+    if (!planned.ok) {
+      console.error(planned.error);
+      process.exitCode = 2;
+    } else {
+      const { from, to, durationMs } = planned.plan;
+      console.log(`[swipe] (${from.x}, ${from.y}) → (${to.x}, ${to.y})，${durationMs}ms`);
+      const dragged = await session.swipe(from.x, from.y, to.x, to.y, durationMs);
+      console.log(dragged.ok ? '控制器回执：拖拽已发送' : dragged.error);
+      if (!dragged.ok) process.exitCode = 1;
+    }
   }
 
   if (wantsOcr) {
