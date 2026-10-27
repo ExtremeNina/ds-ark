@@ -28,6 +28,10 @@ const PAUSE_BANNER = /paus|暂停/i;
 const DIGIT_LIKE = /^[0-9OoIl|/]+$/;
 /** 手牌卡费：最多两个非数字前缀（卡面图标被认成字母，如 `N16`），后面接 1~2 位数字。 */
 const CARD_COST = /^[^\d]{0,2}(\d{1,2})$/;
+/** 三位数的情形：邻卡粘连（`118` = 邻卡的 1 + 18，`167` = 16 + 邻卡的 7）。 */
+const CARD_COST_BLEED = /^[^\d]{0,2}(\d{3})$/;
+/** 干员部署费用的上限：6★ 实测最高 34~36，留一点余量；不存在三位数的卡费。 */
+const CARD_COST_MAX = 40;
 
 function squeeze(text: string): string {
   return text.replace(/\s+/g, '');
@@ -53,12 +57,22 @@ function toNumber(text: string): number | null {
 /**
  * 手牌卡费：允许图标被认成字母的前缀，取末尾的数字。
  *
- * 超过两位一律丢弃：`118` 无法确定是 `18` 还是 `118`，按「读不到就是 null，绝不冒充」
- * 的底线，宁可少报一张卡也不报错数。
+ * 三位数是「邻卡粘连」的产物（`118` = 邻卡的 1 + 18，`167` = 16 + 邻卡的 7）。
+ * 卡费上限是 40，所以先试去掉首位（左侧邻卡和卡框更容易并进来），不合法再去掉末位；
+ * 两个候选都超限、或位数更多时仍然丢弃，不猜。
  */
 function toCardCost(text: string): number | null {
-  const match = CARD_COST.exec(digitsOnly(text) ?? squeeze(text));
-  return match ? Number(match[1]) : null;
+  const value = digitsOnly(text) ?? squeeze(text);
+  const strict = CARD_COST.exec(value);
+  if (strict) return Number(strict[1]);
+
+  const bleed = CARD_COST_BLEED.exec(value);
+  if (!bleed) return null;
+  const digits = bleed[1]!;
+  const droppedFirst = Number(digits.slice(1));
+  if (droppedFirst <= CARD_COST_MAX) return droppedFirst;
+  const droppedLast = Number(digits.slice(0, 2));
+  return droppedLast <= CARD_COST_MAX ? droppedLast : null;
 }
 
 /** 手牌候选：除费用外还留着中心 y，用来判断它是不是和别的卡费在同一排。 */

@@ -122,10 +122,16 @@ describe('战场状态解析', () => {
     expect(parseBattleState([banner('PAUSE')]).paused).toBe(true);
   });
 
-  it('手牌卡费容忍图标前缀，三位数按误识丢弃', () => {
+  it('手牌卡费容忍图标前缀，三位数按邻卡粘连拆回两位', () => {
     expect(parseBattleState([card('N16', 0.26)]).handCosts.map((c) => c.cost)).toEqual([16]);
     expect(parseBattleState([card('1 6', 0.38)]).handCosts.map((c) => c.cost)).toEqual([16]);
-    expect(parseBattleState([card('118', 0.51)]).handCosts).toEqual([]);
+    // 118 = 邻卡的 1 + 18；167 = 16 + 邻卡的 7；819 = 邻卡的 8 + 19（去首位都在 40 以内）。
+    expect(parseBattleState([card('118', 0.51)]).handCosts.map((c) => c.cost)).toEqual([18]);
+    expect(parseBattleState([card('A167', 0.35)]).handCosts.map((c) => c.cost)).toEqual([16]);
+    expect(parseBattleState([card('819', 0.52)]).handCosts.map((c) => c.cost)).toEqual([19]);
+    // 拆不出合法值就仍然丢弃：99 超上限，四位数更不可能是卡费。
+    expect(parseBattleState([card('999', 0.60)]).handCosts).toEqual([]);
+    expect(parseBattleState([card('1234', 0.70)]).handCosts).toEqual([]);
   });
 
   it('真机一帧回归：敌人、手牌、部署费用三处都不再读错', () => {
@@ -150,7 +156,8 @@ describe('战场状态解析', () => {
     expect(state.enemies).toBe('0/11');
     expect(state.life).toBe(20);
     expect(state.paused).toBe(true);
-    expect(state.handCosts.map((c) => c.cost)).toEqual([16, 16, 20, 24]);
+    // `118` 现在是邻卡粘连的 18，不是被丢掉。
+    expect(state.handCosts.map((c) => c.cost)).toEqual([16, 16, 18, 20, 24]);
     // 最右一张卡（24）留在 hand，部署费用取右下角的 29。
     expect(state.cost).toBe(29);
     expect(missingFields(state)).toEqual([]);
@@ -183,8 +190,8 @@ describe('战场状态解析', () => {
     expect(state.life).toBe(20);
     expect(state.paused).toBe(true);
     expect(state.cost).toBe(16);
-    // 12 / 16 / 16 / 17 / 18 / 24：没有 4，`819` 也按三位误识丢掉了。
-    expect(state.handCosts.map((c) => c.cost)).toEqual([12, 16, 16, 17, 18, 24]);
+    // 12 / 16 / 16 / 17 / 18 / 19 / 24：没有 4，`819` 拆成 19、`非18` 取 18。
+    expect(state.handCosts.map((c) => c.cost)).toEqual([12, 16, 16, 17, 18, 19, 24]);
   });
 
   it('手牌按排聚类：即便区间放进来了，偏离卡费行的数字也会被剔除', () => {
