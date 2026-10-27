@@ -30,26 +30,36 @@ function take(name: string): string | true | undefined {
   return next && !next.startsWith('--') ? next : true;
 }
 
+class ArgError extends Error {}
+
 function takePoint(name: string): { x: number; y: number } | undefined {
   const raw = take(name);
   if (typeof raw !== 'string') return undefined;
   const [x, y] = raw.split(',').map((part) => Number(part.trim()));
-  if (!Number.isFinite(x) || !Number.isFinite(y)) {
-    console.error(`--${name} 需要 "数字,数字"，收到：${raw}`);
-    process.exitCode = 2;
-    return undefined;
-  }
-  return { x: x!, y: y! };
+  // 参数写错就整体放弃，绝不退回默认坐标去点游戏。
+  if (!Number.isFinite(x) || !Number.isFinite(y)) throw new ArgError(`--${name} 需要 "数字,数字"，收到：${raw}`);
+  return { x: x as number, y: y as number };
 }
 
 async function main(): Promise<void> {
   const windowArg = take('window');
   const inputArg = take('input');
   const screencapArg = take('screencap');
-  const pauseArg = takePoint('pause');
   const clickArg = take('click');
   const shotArg = take('shot');
-  if (process.exitCode) return;
+
+  let pauseArg: { x: number; y: number } | undefined;
+  let pixelTarget: { x: number; y: number } | undefined;
+  try {
+    pauseArg = takePoint('pause');
+    pixelTarget = takePoint('click');
+  } catch (error) {
+    if (!(error instanceof ArgError)) throw error;
+    console.error(error.message);
+    console.error('参数写错时不会发送任何点击。');
+    process.exitCode = 2;
+    return;
+  }
 
   const prefix = typeof shotArg === 'string' ? shotArg : 'smoke';
   const cfg: ArknightsConfigSection = {
@@ -106,7 +116,6 @@ async function main(): Promise<void> {
   }
   console.log(`截图：${save('before', before.png)}（${before.png.byteLength} 字节）`);
 
-  const pixelTarget = takePoint('click');
   if (clickArg === undefined && pixelTarget === undefined) {
     console.log('未发送点击。要试点击：pnpm smoke --click');
     await session.stop();

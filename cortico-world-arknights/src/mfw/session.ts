@@ -56,7 +56,6 @@ function destroyQuietly(ctrl: MaaControllerLike | null): void {
 export class ArknightsSession {
   private ctrl: MaaControllerLike | null = null;
   private win: WindowInfo | null = null;
-  private res: readonly [number, number] | null = null;
   /** 最近一帧的真实像素尺寸；点击换算以它为准。 */
   private frame: { width: number; height: number } | null = null;
   private warnedSizeMismatch = false;
@@ -84,7 +83,7 @@ export class ArknightsSession {
    */
   get resolution(): readonly [number, number] | null {
     if (this.frame) return [this.frame.width, this.frame.height];
-    return this.res ?? this.readResolution();
+    return this.readResolution();
   }
 
   /**
@@ -102,7 +101,12 @@ export class ArknightsSession {
     }
     await this.stop();
 
-    const loaded = await this.load();
+    let loaded: MaaLoadResult;
+    try {
+      loaded = await this.load();
+    } catch (error) {
+      return { ok: false, error: `连接失败：加载原生模块时抛错（${errorText(error)}）` };
+    }
     if (!loaded.ok) return { ok: false, error: `连接失败：${loaded.error}` };
 
     const maa = loaded.maa;
@@ -166,17 +170,18 @@ export class ArknightsSession {
 
     this.ctrl = ctrl;
     this.win = win;
-    this.res = this.readResolution();
-    if (!this.resolution) {
-      // 连接成功但还没拿到分辨率：抓一帧把尺寸带出来，顺便确认截图链路真的通。
+    let size = this.resolution;
+    if (!size) {
+      // 连接成功但还没拿到尺寸：抓一帧把尺寸带出来，顺便确认截图链路真的通。
       const shot = await this.screencap();
-      if (!this.resolution) {
+      size = this.resolution;
+      if (!size) {
         await this.stop();
         const detail = shot.ok ? '抓到了画面但读不出尺寸' : shot.error;
         return { ok: false, error: `连接失败：窗口连上了但拿不到画面尺寸（${detail}）。已断开连接。` };
       }
     }
-    return { ok: true, window: win, resolution: this.resolution! };
+    return { ok: true, window: win, resolution: size };
   }
 
   async screencap(): Promise<ScreencapResult> {
@@ -241,7 +246,6 @@ export class ArknightsSession {
     destroyQuietly(this.ctrl);
     this.ctrl = null;
     this.win = null;
-    this.res = null;
     this.frame = null;
     this.warnedSizeMismatch = false;
   }

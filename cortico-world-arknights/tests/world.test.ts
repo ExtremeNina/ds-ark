@@ -191,7 +191,7 @@ describe('明日方舟 World', () => {
     expect(outcome.text).toContain('无标题 - 记事本');
   });
 
-  it('未连接时三个工具都返回失败回执，而不是抛错', async () => {
+  it('未连接时连接/截图/暂停都返回失败回执，而不是抛错', async () => {
     FakeController.devices = [];
     const { world } = newWorld();
     const connect = receipt(await toolOf(world, 'ark_connect').handler({}, call));
