@@ -101,6 +101,8 @@ class FakeController implements MaaControllerLike {
 class FakeResource implements MaaResourceLike {
   static paths: string[] = [];
   static failAll = false;
+  /** 模拟「路径存在但模型文件坏了」：post_ocr_model 直接抛错。 */
+  static throwOnLoad = false;
   static instances: FakeResource[] = [];
   loaded = false;
 
@@ -110,6 +112,7 @@ class FakeResource implements MaaResourceLike {
 
   post_ocr_model(path: string): MaaJobLike {
     FakeResource.paths.push(path);
+    if (FakeResource.throwOnLoad) throw new Error('模型文件损坏');
     this.loaded = !FakeResource.failAll;
     const job: MaaJobLike = { succeeded: this.loaded, status: this.loaded ? 1 : 0, wait: async () => job };
     return job;
@@ -188,6 +191,7 @@ beforeEach(() => {
   FakeController.emptyImage = false;
   FakeResource.paths = [];
   FakeResource.failAll = false;
+  FakeResource.throwOnLoad = false;
   FakeResource.instances = [];
   FakeTasker.entries = [];
   FakeTasker.created = [];
@@ -544,6 +548,18 @@ describe('明日方舟 World', () => {
     expect(outcome.text).toContain('model');
     expect(outcome.blobs).toHaveLength(1);
     expect(FakeResource.paths).toHaveLength(3);
+  });
+
+  it('读战场：模型加载直接抛错时，回执里既有试过的路径也有最后的原因', async () => {
+    FakeResource.throwOnLoad = true;
+    const { ctx, world } = newWorld();
+    Object.assign(ctx.cfg, { resourceDir: 'C:\\broken-maa' });
+    await toolOf(world, 'ark_connect').handler({}, call);
+
+    const outcome = receipt(await toolOf(world, 'ark_battle_state').handler({}, call));
+    expect(outcome.text).toContain('试过');
+    expect(outcome.text).toContain('模型文件损坏');
+    expect(outcome.blobs).toHaveLength(1);
   });
 
   it('部署：两次拖拽的端点与时长都对，并补拍一帧', async () => {

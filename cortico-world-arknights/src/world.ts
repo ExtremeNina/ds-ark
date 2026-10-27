@@ -176,7 +176,7 @@ export class ArknightsWorld implements World {
         {
           key: 'worlds.arknights.envPrompt',
           title: '明日方舟 · 环境提示词',
-          description: '本 World 进 system 前缀的那一段：何时连接、何时截图、何时暂停。',
+          description: '本 World 进 system 前缀的那一段：何时连接、何时截图、何时读战场、何时暂停与部署。',
           path: ENV_PROMPT_FILE,
           role: 'envPrompt',
           vars: [{ name: 'arknights.windowMatch', description: '配置里当前的窗口名关键字。' }],
@@ -193,7 +193,8 @@ export class ArknightsWorld implements World {
       source: this.id,
       origin: 'internal',
       senderKey: this.id,
-      text: '明日方舟 World 已挂载。ark_connect / ark_screencap / ark_set_paused 可用；尚未连接游戏窗口，也还没有任何识别能力。',
+      text: '明日方舟 World 已挂载。ark_connect / ark_screencap / ark_set_paused / ark_battle_state / ark_deploy 可用；'
+        + '尚未连接游戏窗口。OCR 需要配置 resourceDir，点击与拖拽都只保证「手势已发出」。',
     });
   }
 
@@ -273,7 +274,7 @@ export class ArknightsWorld implements World {
     const size = this.session.resolution;
     const label = size ? `${size[0]}×${size[1]}` : '尺寸未知';
     const fallbackText = `明日方舟战场帧，${label}，PNG ${shot.png.byteLength} 字节（端点不接受图片时只发送这句）。`;
-    const ocr = await this.session.recognize(shot.png, this.opts.cfg.resourceDir);
+    const ocr = await this.session.recognizeFrame(shot.png, this.opts.cfg.resourceDir);
     if (!ocr.ok) {
       return {
         text: `已抓取一帧，${label}。这次读不出战场数字（${ocr.error}）。附件就是这一帧，请自己看图判断；`

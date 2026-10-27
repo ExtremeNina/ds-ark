@@ -73,7 +73,7 @@ Coopanion（Cortico 框架）的 World 扩展：把国服《明日方舟》PC �
 `ark_battle_state` 会把费用、生命值、剩余敌人、暂停横幅和手牌费用读出来。识别用的是 **MaaFramework 自带的 OCR**，模型来自你本机的 MAA 资源包——扩展不打包模型、不下载模型、不联网：
 
 1. 把 `resourceDir` 指到资源包根目录（例如 MaaAssistantArknights 的 `resource`），里面应有 `model/ocr/`。
-2. 重启 Coopanion。第一次调用 `ark_battle_state` 时会加载模型（约 1~2 秒），之后复用。
+2. 重启 Coopanion。第一次调用 `ark_battle_state` 时会加载模型（约 1~2 秒），之后复用；每次识别在 CPU 上约 0.1~0.3 秒，加上抓帧整体不到半秒。
 3. 留空或路径不对时，`ark_battle_state` **不报失败**：仍然返回那一帧，并在回执里说明「这次读不出战场数字」，模型改看图。
 
 扩展只调用 `Resource.post_ocr_model()` 与 `Tasker.post_recognition()`，不加载 pipeline、不接管截图与点击。识别结果按**画面区域**归类（顶部条 / 中央横幅 / 右下费用 / 底部手牌），区间常量在 `src/battle/regions.ts`，注释里写了它们来自 1280×720 真机帧的位置。
@@ -136,7 +136,7 @@ pnpm smoke --screencap DXGI_DesktopDup       # 换截图方式
 ```bash
 corepack pnpm install   # 装依赖（含 @maaxyz/maa-node 预编译原生包，下载较慢）
 pnpm typecheck          # tsc --noEmit
-pnpm test               # vitest run（74 个用例，不需要游戏，也不加载原生模块）
+pnpm test               # vitest run（75 个用例，不需要游戏，也不加载原生模块）
 ```
 
 测试用假的 maa 模块替掉原生绑定，覆盖坐标换算、窗口匹配、未连接降级、回执形状、区域归类与数字清洗、部署几何、OCR 的加载失败与「没有模型」降级，以及 `tools()` / `describe.json` / `ENV_PROMPT.md` 三者的一致性。
@@ -163,7 +163,7 @@ pnpm check:extension <本包目录>
 
 真机冒烟全绿之后再接线（冒烟只验证底层，不经过 Coopanion）：
 
-1. 本目录 `corepack pnpm install && pnpm test`，确认 74 个用例通过。
+1. 本目录 `corepack pnpm install && pnpm test`，确认 75 个用例通过。
 2. 扩展页 → 从本机目录安装（`link`）→ **重启 Coopanion 进程**。
 3. World 总览启用「明日方舟」；在配置里填 `resourceDir`（MAA 资源包根目录），保存。
 4. 进一场 1-7（或任意已解锁的关卡），让战斗跑起来，然后逐条验收：
@@ -176,6 +176,11 @@ pnpm check:extension <本包目录>
 | 4 | `ark_set_paused(true)` | 回执附图中出现 PAUSE 浮层 |
 | 5 | `ark_deploy`（从第 2 步的图里挑手牌与地块） | 回执附图中目标地块上出现干员，朝向箭头正确 |
 | 6 | `ark_set_paused(false)` | 回执附图中浮层消失，干员开始攻击 |
+
+另外单独验两条降级，确认「不知道」不会被说成「没问题」：
+
+- 把 `resourceDir` 临时清空 → `ark_battle_state` 仍然返回一张图，并说明「这台机器上没有配置 OCR」；它不算失败，模型应当改看图而不是报错停住。
+- 战斗中故意让某项落在识别区间之外（比如换了个 UI 布局）→ 回执里出现「没读到：…」，而不是 0。
 
 判定要点：第 4~6 步允许失败一次（拖拽被忽略是已知可能），但**每次失败都要能从附件画面看出「没落位」**——如果回执说拖了、图里却什么都没有，说明手势没送达，先把 `inputMethod` 换成 `AnchoredTouch` 再试，仍失败则停下来查权限与输入方式，不要连发。
 

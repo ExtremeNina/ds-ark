@@ -32,7 +32,7 @@ export const ARKNIGHTS: WorldDefinition<ArknightsConfigSection> = {
         en: 'Captures the frame and reads cost, life points, enemies left, the pause banner and hand costs; unreadable fields are reported as missing.',
       },
       ark_deploy: {
-        zh: '把手牌拖到战场地块并拖出朝向，完成一次干员部署；回执只说明拖拽已发出。',
+        zh: '把手牌拖到战场地块并拖出朝向；回执只说明拖拽已发出，落位与否由画面判断。',
         en: 'Drags one hand card onto a battlefield tile and sets the facing; the receipt only states that the drags were sent.',
       },
     }),

@@ -130,6 +130,7 @@ export class ArknightsOcr {
       return;
     }
 
+    let lastError: string | null = null;
     for (const path of candidates) {
       let resource: MaaResourceLike | null = null;
       try {
@@ -149,7 +150,7 @@ export class ArknightsOcr {
           return;
         }
       } catch (error) {
-        this.failure = `加载 OCR 模型失败：${errorText(error)}`;
+        lastError = errorText(error);
       }
       try {
         resource?.destroy();
@@ -158,7 +159,9 @@ export class ArknightsOcr {
       }
     }
 
-    this.failure ??= `没找到可用的 OCR 模型：试过 ${candidates.join('、')}。`
+    // 试过的路径与最后一次报错一起给：排障时缺一不可。
+    const reason = lastError ? `（最后一次失败：${lastError}）` : '';
+    this.failure = `没找到可用的 OCR 模型：试过 ${candidates.join('、')}${reason}。`
       + 'resourceDir 应指向 MAA 资源包根目录（内含 model/ocr）。';
   }
 

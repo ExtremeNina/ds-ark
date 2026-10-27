@@ -156,10 +156,12 @@ async function main(): Promise<void> {
     if (!cfg.resourceDir.trim()) {
       console.log('[ocr] 没配资源目录：用 --resource <MAA 资源包根目录> 指定，或写进配置 worlds.arknights.resourceDir。');
     }
-    const ocr = await session.recognize(before.png, cfg.resourceDir);
+    const ocr = await session.recognizeFrame(before.png, cfg.resourceDir);
     if (!ocr.ok) {
-      console.error(ocr.error);
-      process.exitCode = 1;
+      // 识别不了不算脚本失败：--state 的意义就是看清楚「能读到什么」，降级信息本身也是结果。
+      console.log(`[state] 这次读不出战场数字：${ocr.error}`);
+      console.log('[state] 附件就是上面的 before 图，直接用眼睛看；补齐 resourceDir 后再试。');
+      if (ocrArg !== undefined) process.exitCode = 1;
     } else {
       if (ocrArg !== undefined) {
         console.log('[ocr] 原始识别明细：');

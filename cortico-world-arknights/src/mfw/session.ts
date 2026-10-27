@@ -297,13 +297,16 @@ export class ArknightsSession {
    * 对传入的这一帧做 OCR。识别能力是「有就用」：resourceDir 为空、模型缺失、绑定不提供
    * Resource/Tasker，都折成可读原因，由调用方决定降级成「只看图」。
    */
-  async recognize(png: Uint8Array, resourceDir: string): Promise<OcrOutcome> {
+  async recognizeFrame(png: Uint8Array, resourceDir: string): Promise<OcrOutcome> {
     const maa = this.maa;
     const ctrl = this.ctrl;
-    const size = this.lastFrameSize;
-    if (!maa || !ctrl || !size || !this.connected) {
-      return { ok: false, error: '识别失败：还没连接游戏窗口或还没有可用帧，先调用 ark_connect 取一帧。' };
+    if (!maa || !ctrl || !this.connected) {
+      return { ok: false, error: '识别失败：还没连接游戏窗口，先调用 ark_connect。' };
     }
+    // 按这一帧自己的尺寸归一化，而不是「最近一帧」：两者不同时框会整体错位。
+    const frame = pngSize(png);
+    const size = frame ?? this.lastFrameSize;
+    if (!size) return { ok: false, error: '识别失败：读不出这一帧的像素尺寸。' };
     if (!resourceDir.trim()) {
       return { ok: false, error: '这台机器上没有配置 OCR：worlds.arknights.resourceDir 为空。' };
     }
