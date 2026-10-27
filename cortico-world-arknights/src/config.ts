@@ -46,7 +46,7 @@ export interface ArknightsConfigSection {
   pauseButton: { x: number; y: number };
   /** 暂停/恢复点击后是否补拍一帧作为附件，让模型自己看结果。 */
   verifyAfterClick: boolean;
-  /** 预留给后续 OCR 的 MaaFramework 资源目录；本版不加载 Resource/Tasker。 */
+  /** MAA 资源包根目录：只从中加载 OCR 模型，不加载 pipeline。留空则不做识别。 */
   resourceDir: string;
 }
 
@@ -121,7 +121,9 @@ export const ARKNIGHTS_CONFIG_GROUP: ConfigGroup = {
       'worlds.arknights.resourceDir': {
         type: 'string',
         title: 'MaaFramework 资源目录',
-        description: '预留给后续 OCR 截图识别用。本版不加载，留空即可。',
+        description:
+          '填 MAA 资源包根目录（内含 model/ocr）。扩展只读其中的 OCR 模型，不加载 pipeline、不打包模型；'
+          + '留空或路径不对时 ark_battle_state 仍然给图，只是读不出数字。',
         'x-hot': false,
         'x-path': { kind: 'directory' },
       },
