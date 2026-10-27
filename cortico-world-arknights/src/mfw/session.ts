@@ -9,7 +9,9 @@ import {
   type MaaDesktopDevice,
   type MaaJobLike,
   type MaaLoadResult,
+  type MaaModule,
 } from './native.ts';
+import { ArknightsOcr, type OcrOutcome } from './ocr.ts';
 import { is16by9 } from './geometry.ts';
 import { pickWindow, parseKeywords, describeDevices, type WindowInfo } from './window.ts';
 import { pngSize, toPngBytes } from './screen.ts';
@@ -19,6 +21,7 @@ const CONNECT_TIMEOUT_MS = 15_000;
 const ENUMERATE_TIMEOUT_MS = 8_000;
 const SCREENCAP_TIMEOUT_MS = 8_000;
 const CLICK_TIMEOUT_MS = 5_000;
+const SWIPE_TIMEOUT_MS = 8_000;
 
 /** 截图方式与输入方式都缺省时的兜底组合：后台可采（FramePool/PrintWindow）+ 后台可点。 */
 const FALLBACK_SCREENCAP = 'Background';
@@ -31,7 +34,7 @@ export type ConnectResult =
 
 export type ScreencapResult = { ok: true; png: Uint8Array } | { ok: false; error: string };
 
-export type ClickResult = { ok: true } | { ok: false; error: string };
+export type ActionResult = { ok: true } | { ok: false; error: string };
 
 /**
  * 配置里的方式名换算成绑定认识的标志位。
@@ -58,6 +61,9 @@ function destroyQuietly(ctrl: MaaControllerLike | null): void {
 export class ArknightsSession {
   private ctrl: MaaControllerLike | null = null;
   private win: WindowInfo | null = null;
+  /** 连接时拿到的模块引用：OCR 要用它的 Resource/Tasker。 */
+  private maa: MaaModule | null = null;
+  private ocr: ArknightsOcr | null = null;
   /** 最近一帧的真实像素尺寸；点击换算以它为准。 */
   private lastFrameSize: { width: number; height: number } | null = null;
   private warnedSizeMismatch = false;
@@ -66,6 +72,7 @@ export class ArknightsSession {
   constructor(
     private readonly load: () => Promise<MaaLoadResult> = loadMaa,
     private readonly warn: (line: string) => void = () => {},
+    private readonly info: (line: string) => void = () => {},
   ) {}
 
   get connected(): boolean {
@@ -173,6 +180,7 @@ export class ArknightsSession {
 
     this.ctrl = ctrl;
     this.win = win;
+    this.maa = maa;
     let size = this.resolution;
     if (!size) {
       // 连接成功但还没拿到尺寸：抓一帧把尺寸带出来，顺便确认截图链路真的通。
@@ -249,7 +257,7 @@ export class ArknightsSession {
     );
   }
 
-  async click(x: number, y: number): Promise<ClickResult> {
+  async click(x: number, y: number): Promise<ActionResult> {
     const ctrl = this.ctrl;
     if (!ctrl || !this.connected) {
       return { ok: false, error: '点击失败：还没连接游戏窗口，先调用 ark_connect。' };
@@ -263,10 +271,55 @@ export class ArknightsSession {
     }
   }
 
+  /** 拖拽：部署干员用。旧绑定没有 `post_swipe` 时给可读原因，而不是让调用方崩在 TypeError 上。 */
+  async swipe(x1: number, y1: number, x2: number, y2: number, duration: number): Promise<ActionResult> {
+    const ctrl = this.ctrl;
+    if (!ctrl || !this.connected) {
+      return { ok: false, error: '拖拽失败：还没连接游戏窗口，先调用 ark_connect。' };
+    }
+    if (typeof ctrl.post_swipe !== 'function') {
+      return { ok: false, error: '拖拽失败：当前 @maaxyz/maa-node 的控制器没有提供 post_swipe，无法发拖拽手势。' };
+    }
+    try {
+      const job = await withTimeout(
+        Promise.resolve(ctrl.post_swipe(x1, y1, x2, y2, duration).wait()),
+        SWIPE_TIMEOUT_MS,
+        '拖拽',
+      );
+      if (!job.succeeded) return { ok: false, error: `拖拽失败：控制器返回失败（状态码 ${String(job.status)}）。` };
+      return { ok: true };
+    } catch (error) {
+      return { ok: false, error: `拖拽失败：${errorText(error)}` };
+    }
+  }
+
+  /**
+   * 对传入的这一帧做 OCR。识别能力是「有就用」：resourceDir 为空、模型缺失、绑定不提供
+   * Resource/Tasker，都折成可读原因，由调用方决定降级成「只看图」。
+   */
+  async recognize(png: Uint8Array, resourceDir: string): Promise<OcrOutcome> {
+    const maa = this.maa;
+    const ctrl = this.ctrl;
+    const size = this.lastFrameSize;
+    if (!maa || !ctrl || !size || !this.connected) {
+      return { ok: false, error: '识别失败：还没连接游戏窗口或还没有可用帧，先调用 ark_connect 取一帧。' };
+    }
+    if (!resourceDir.trim()) {
+      return { ok: false, error: '这台机器上没有配置 OCR：worlds.arknights.resourceDir 为空。' };
+    }
+    this.ocr ??= new ArknightsOcr(maa, ctrl, (line) => this.info(line));
+    const loaded = await this.ocr.load(resourceDir);
+    if (!loaded.ok) return { ok: false, error: `识别不可用：${loaded.error}` };
+    return this.ocr.recognize(png, [size.width, size.height]);
+  }
+
   async stop(): Promise<void> {
+    this.ocr?.dispose();
+    this.ocr = null;
     destroyQuietly(this.ctrl);
     this.ctrl = null;
     this.win = null;
+    this.maa = null;
     this.lastFrameSize = null;
     this.warnedSizeMismatch = false;
     this.warnedAspect = false;

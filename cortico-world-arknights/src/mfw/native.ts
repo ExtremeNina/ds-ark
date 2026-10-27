@@ -27,6 +27,8 @@ export interface MaaControllerLike {
   readonly resolution: [number, number] | null;
   post_connection(): MaaJobLike;
   post_click(x: number, y: number, contact?: number, pressure?: number): MaaJobLike;
+  /** 拖拽（部署用）；旧绑定可能没有这个方法，调用前要判空。 */
+  post_swipe?(x1: number, y1: number, x2: number, y2: number, duration: number, contact?: number, pressure?: number): MaaJobLike;
   post_screencap(): MaaImageJobLike;
   destroy(): void;
 }
@@ -36,11 +38,48 @@ export interface MaaWin32ControllerCtor {
   find(): Promise<readonly MaaDesktopDevice[] | null>;
 }
 
+/** TaskJob：比普通 Job 多一个 id 与同步取结果的 `get()`。 */
+export interface MaaTaskJobLike extends MaaJobLike {
+  readonly id: number;
+  get(): unknown;
+}
+
+/** Resource：只用到「加载 OCR 模型」这一件事。 */
+export interface MaaResourceLike {
+  readonly loaded: boolean;
+  post_ocr_model(path: string): MaaJobLike;
+  destroy(): void;
+}
+
+/**
+ * Tasker：只用来对单张图跑识别（`post_recognition`）。
+ * 刻意不声明 `post_task`：本扩展不把控制权交给 pipeline。
+ */
+export interface MaaTaskerLike {
+  resource: MaaResourceLike | null;
+  controller: MaaControllerLike | null;
+  post_recognition(type: string, param: Record<string, unknown>, image: ArrayBuffer): MaaTaskJobLike;
+  node_detail(id: number): unknown;
+  recognition_detail(id: number): unknown;
+  destroy(): void;
+}
+
+export interface MaaResourceCtor {
+  new (): MaaResourceLike;
+}
+
+export interface MaaTaskerCtor {
+  new (): MaaTaskerLike;
+}
+
 /** 只声明本扩展用到的部分；真实模块由 `loadMaa()` 一次性断言成这个形状。 */
 export interface MaaModule {
   readonly Win32Controller: MaaWin32ControllerCtor;
   readonly Win32ScreencapMethod?: Record<string, string>;
   readonly Win32InputMethod?: Record<string, string>;
+  /** 以下两项缺失时不报错，只是没有 OCR 能力。 */
+  readonly Resource?: MaaResourceCtor;
+  readonly Tasker?: MaaTaskerCtor;
 }
 
 export type MaaLoadResult = { ok: true; maa: MaaModule } | { ok: false; error: string };
