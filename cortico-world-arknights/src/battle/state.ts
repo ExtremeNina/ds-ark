@@ -2,6 +2,8 @@
  * 战场状态解析：把 OCR 文字行按区域折成结构化字段。
  *
  * 只做几何归类与数字清洗，不做任何推断：读不到就是 `null`，绝不用 0 或「未暂停」冒充结果。
+ * 数字清洗含一次受限的字符纠错（`O/o→0`、`I/l/|→1`），只在纯数字语境生效——否则 `PAUSE`
+ * 会被改成 `PA0SE`，暂停横幅就认不出来了。
  * 暂停态是三态——`true` 表示认到了横幅，`null` 表示没认到（**不等于**没暂停）。
  */
 import type { OcrLine } from '../mfw/ocr.ts';
@@ -22,14 +24,41 @@ const INTEGER = /^\d+$/;
 const RATIO = /^(\d+)\/(\d+)$/;
 /** 暂停横幅上的字：PAUSE 可能被认成 PAUS/PAUSF，中文则是「暂停中」。 */
 const PAUSE_BANNER = /paus|暂停/i;
+/** 只含数字与常见误识字符：0↔O/o、1↔I/l/|，外加分隔用的斜杠。 */
+const DIGIT_LIKE = /^[0-9OoIl|/]+$/;
+/** 手牌卡费：最多两个非数字前缀（卡面图标被认成字母，如 `N16`），后面接 1~2 位数字。 */
+const CARD_COST = /^[^\d]{0,2}(\d{1,2})$/;
 
 function squeeze(text: string): string {
   return text.replace(/\s+/g, '');
 }
 
-function toNumber(text: string): number | null {
+/**
+ * 数字语境归一化：只在「整串都是数字或易混字符、且至少有一个真数字」时，
+ * 把 `O/o` 换成 `0`、`I/l/|` 换成 `1`；否则返回 null。
+ *
+ * 必须限定语境：`PAUSE` 里也有 O，全局替换会变成 `PA0SE`，暂停横幅就认不出来了。
+ */
+function digitsOnly(text: string): string | null {
   const value = squeeze(text);
-  return INTEGER.test(value) ? Number(value) : null;
+  if (!DIGIT_LIKE.test(value) || !/\d/.test(value)) return null;
+  return value.replace(/[Oo]/g, '0').replace(/[Il|]/g, '1');
+}
+
+function toNumber(text: string): number | null {
+  const value = digitsOnly(text);
+  return value !== null && INTEGER.test(value) ? Number(value) : null;
+}
+
+/**
+ * 手牌卡费：允许图标被认成字母的前缀，取末尾的数字。
+ *
+ * 超过两位一律丢弃：`118` 无法确定是 `18` 还是 `118`，按「读不到就是 null，绝不冒充」
+ * 的底线，宁可少报一张卡也不报错数。
+ */
+function toCardCost(text: string): number | null {
+  const match = CARD_COST.exec(digitsOnly(text) ?? squeeze(text));
+  return match ? Number(match[1]) : null;
 }
 
 /** 把识别行折成战场状态；同一位置出现多次时取第一个认到的值。 */
@@ -49,7 +78,7 @@ export function parseBattleState(lines: readonly OcrLine[]): BattleState {
         if (PAUSE_BANNER.test(text)) paused = true;
         break;
       case 'top': {
-        const ratio = RATIO.exec(squeeze(text));
+        const ratio = RATIO.exec(digitsOnly(text) ?? '');
         if (ratio) {
           enemies ??= `${ratio[1]}/${ratio[2]}`;
         } else {
@@ -58,7 +87,7 @@ export function parseBattleState(lines: readonly OcrLine[]): BattleState {
         break;
       }
       case 'hand': {
-        const value = toNumber(text);
+        const value = toCardCost(text);
         if (value !== null) handCosts.push({ cost: value, x: line.box.x + line.box.w / 2 });
         break;
       }

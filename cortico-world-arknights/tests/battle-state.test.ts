@@ -14,6 +14,11 @@ const cost = (text = '28') => line(text, 0.94, 0.79);
 const card = (text: string, x: number) => line(text, x, 0.92, 0.03);
 const banner = (text = 'PAUSE') => line(text, 0.45, 0.40, 0.10, 0.06);
 
+/** 真机帧是 1280×720；直接按像素写框，省得手算归一化写错。 */
+function px(text: string, x: number, y: number, w: number, h: number): OcrLine {
+  return { text, box: { x: x / 1280, y: y / 720, w: w / 1280, h: h / 720 } };
+}
+
 describe('区域归类', () => {
   it('顶部条、横幅、费用、手牌各归各位', () => {
     expect(regionOf(enemies().box)).toBe('top');
@@ -29,6 +34,12 @@ describe('区域归类', () => {
 
   it('画面中部的战斗文字不属于任何读数区', () => {
     expect(regionOf(line('行动结束', 0.4, 0.65, 0.1, 0.05).box)).toBe('unknown');
+  });
+
+  it('费用带与手牌带在 y≈0.82 / 0.83 处分界', () => {
+    // 中心 y=0.819 → 费用；中心 y=0.831 → 手牌（手牌判定在前，双保险）。
+    expect(regionOf({ x: 0.9, y: 0.804, w: 0.04, h: 0.03 })).toBe('cost');
+    expect(regionOf({ x: 0.9, y: 0.816, w: 0.04, h: 0.03 })).toBe('hand');
   });
 });
 
@@ -89,6 +100,47 @@ describe('战场状态解析', () => {
   it('缺项清单只列真的没读到的', () => {
     const state = parseBattleState([cost(), card('12', 0.05), card('16', 0.22)]);
     expect(missingFields(state)).toEqual(['生命值', '剩余敌人']);
+  });
+
+  it('数字语境纠错：0 被认成 O 也能读出来，字母词不受影响', () => {
+    expect(parseBattleState([enemies('O/11')]).enemies).toBe('0/11');
+    expect(parseBattleState([life('2O')]).life).toBe(20);
+    // PAUSE 里也有 O：纠错只在数字语境生效，否则横幅会变成 PA0SE 认不出来。
+    expect(parseBattleState([banner('PAUSE')]).paused).toBe(true);
+  });
+
+  it('手牌卡费容忍图标前缀，三位数按误识丢弃', () => {
+    expect(parseBattleState([card('N16', 0.26)]).handCosts.map((c) => c.cost)).toEqual([16]);
+    expect(parseBattleState([card('1 6', 0.38)]).handCosts.map((c) => c.cost)).toEqual([16]);
+    expect(parseBattleState([card('118', 0.51)]).handCosts).toEqual([]);
+  });
+
+  it('真机一帧回归：敌人、手牌、部署费用三处都不再读错', () => {
+    // 坐标照抄 2026-10 真机日志（1280×720、暂停中）。
+    const state = parseBattleState([
+      px('N16', 340, 594, 66, 33),
+      px('PAUSE', 484, 283, 306, 90),
+      px('16', 486, 603, 28, 16),
+      px('ENEH', 489, 33, 33, 17),
+      px('O/11', 550, 14, 56, 29),
+      px('暂停中', 593, 366, 91, 35),
+      px('118', 656, 591, 70, 37),
+      px('H', 682, 11, 31, 35),
+      px('20', 740, 15, 36, 27),
+      px('20', 874, 592, 67, 34),
+      px('1X', 1066, 18, 60, 60),
+      px('剩余可放置角色：8', 1080, 550, 178, 23),
+      px('24', 1085, 591, 71, 39),
+      px('C', 1160, 496, 41, 41),
+      px('29', 1201, 491, 65, 49),
+    ]);
+    expect(state.enemies).toBe('0/11');
+    expect(state.life).toBe(20);
+    expect(state.paused).toBe(true);
+    expect(state.handCosts.map((c) => c.cost)).toEqual([16, 16, 20, 24]);
+    // 最右一张卡（24）留在 hand，部署费用取右下角的 29。
+    expect(state.cost).toBe(29);
+    expect(missingFields(state)).toEqual([]);
   });
 });
 
