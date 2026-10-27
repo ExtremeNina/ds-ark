@@ -5,7 +5,7 @@
  *   pnpm smoke --click                          点配置里的暂停坐标（默认 0.97 / 0.06）
  *   pnpm smoke --click 60,555                   按像素点一个大目标，用来判断输入是否送达
  *   pnpm smoke --click --input AnchoredTouch    换输入方式
- *   pnpm smoke --click --pause 0.962,0.044      现场校准暂停坐标
+ *   pnpm smoke --click --pause 0.966,0.071      现场校准暂停坐标（当前默认值）
  *   pnpm smoke --window "明日方舟" --shot trial 指定窗口关键字与输出前缀
  *
  * 每次点击后自动补拍一张 `<前缀>-after.png`，与 `<前缀>-before.png` 对照即可判断有没有生效。
@@ -110,9 +110,9 @@ async function main(): Promise<void> {
   const beforeSize = pngSize(before.png);
   console.log(`本帧实际像素尺寸：${beforeSize ? `${beforeSize.width}×${beforeSize.height}` : '读不出来'}`);
   if (beforeSize && reported && (beforeSize.width !== reported[0] || beforeSize.height !== reported[1])) {
-    console.warn(`[warn] 控制器尺寸 ${reported[0]}×${reported[1]} 与本帧 ${beforeSize.width}×${beforeSize.height} 不一致。`);
-    console.warn('        常见于该截图方式抓到整屏（DXGI_DesktopDup）：坐标会按本帧换算，但落点仍在整屏坐标系里，');
-    console.warn('        点不到游戏窗口内的按钮。做点击验证时请用能只截窗口的方式（如 Background）。');
+    console.log(`[info] 控制器尺寸 ${reported[0]}×${reported[1]} 与本帧 ${beforeSize.width}×${beforeSize.height} 不同。`);
+    console.log('       这是 MaaFramework 把截图短边缩到 720 的正常结果（窗口 1920×1080 → 帧 1280×720），');
+    console.log('       点击按本帧换算。只有当控制器尺寸明显大于窗口、且帧里能看到桌面背景时，才是整屏抓取。');
   }
   console.log(`截图：${save('before', before.png)}（${before.png.byteLength} 字节）`);
 
@@ -127,7 +127,13 @@ async function main(): Promise<void> {
     ? [beforeSize.width, beforeSize.height]
     : [width, height];
   const point = pixelTarget ?? toPoint(cfg.pauseButton, frameSize);
+  const normX = point.x / Math.max(1, frameSize[0] - 1);
+  const normY = point.y / Math.max(1, frameSize[1] - 1);
   console.log(`点击目标：(${point.x}, ${point.y})，输入方式 ${cfg.inputMethod}`);
+  console.log(
+    `  归一化：${normX.toFixed(3)},${normY.toFixed(3)}　画面比例：${(frameSize[0] / frameSize[1]).toFixed(3)}`
+      + '（标定基准为 1.778，即 16:9）',
+  );
 
   const clicked = await session.click(point.x, point.y);
   console.log(clicked.ok ? '控制器回执：点击已发送' : clicked.error);
