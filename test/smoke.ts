@@ -4,6 +4,9 @@
  *   pnpm smoke                                  只截图，不点击
  *   pnpm smoke --state                          只读：抓帧 + 识别战场数字，打印原始行与结构化结果
  *   pnpm smoke --watch [ms]                     只读循环：每 ms（默认 3000）读一次，认到结算自动退出
+ *   pnpm smoke --auto                           本地自动打一局（固定策略，不需要模型）：下得起就下，直到结算
+ *   pnpm smoke --auto --auto-tiles "0.4,0.55;0.5,0.65"   自己给候选地块（默认一张常见清单）
+ *   pnpm smoke --auto --auto-max 40             最多走多少步（默认 30）
  *   pnpm smoke --ocr                            只跑识别，额外打印原始识别明细（确认模型路径与返回结构）
  *   pnpm smoke --click                          点配置里的暂停坐标（默认 0.966 / 0.071）
  *   pnpm smoke --click 60,555                   按像素点一个大目标，用来判断输入是否送达
@@ -22,7 +25,7 @@ import { DEPLOY_DIRECTIONS, planDeploy } from '../cortico-world-arknights/src/ba
 import { regionOf } from '../cortico-world-arknights/src/battle/regions.ts';
 import { describeBattleState, missingFields, parseBattleState } from '../cortico-world-arknights/src/battle/state.ts';
 import { ARKNIGHTS_DEFAULTS, type ArknightsConfigSection } from '../cortico-world-arknights/src/config.ts';
-import { toPoint } from '../cortico-world-arknights/src/mfw/geometry.ts';
+import { pausePoint, toPoint } from '../cortico-world-arknights/src/mfw/geometry.ts';
 import { pngSize } from '../cortico-world-arknights/src/mfw/screen.ts';
 import { ArknightsSession } from '../cortico-world-arknights/src/mfw/session.ts';
 
@@ -47,6 +50,21 @@ function takePoint(name: string): { x: number; y: number } | undefined {
   // 参数写错就整体放弃，绝不退回默认坐标去点游戏。
   if (!Number.isFinite(x) || !Number.isFinite(y)) throw new ArgError(`--${name} 需要 "数字,数字"，收到：${raw}`);
   return { x: x as number, y: y as number };
+}
+
+/** `--auto-tiles "0.4,0.55;0.5,0.65"` → 候选地块列表。 */
+function parseTiles(raw: string): Array<{ x: number; y: number }> {
+  const tiles = raw
+    .split(';')
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .map((pair) => {
+      const [x, y] = pair.split(',').map((value) => Number(value.trim()));
+      if (!Number.isFinite(x) || !Number.isFinite(y)) throw new ArgError(`--auto-tiles 里有非法坐标：${pair}`);
+      return { x: x as number, y: y as number };
+    });
+  if (tiles.length === 0) throw new ArgError('--auto-tiles 至少给一个 "x,y"');
+  return tiles;
 }
 
 /**
@@ -83,6 +101,118 @@ async function runWatch(session: ArknightsSession, cfg: ArknightsConfigSection, 
   }
 }
 
+/** `--auto` 的默认地块清单：常见关卡中前段的几处，按顺序试，落不了位就换下一个。 */
+const AUTO_TILES: ReadonlyArray<{ x: number; y: number }> = [
+  { x: 0.4, y: 0.55 },
+  { x: 0.5, y: 0.55 },
+  { x: 0.6, y: 0.55 },
+  { x: 0.35, y: 0.65 },
+  { x: 0.45, y: 0.65 },
+  { x: 0.55, y: 0.65 },
+  { x: 0.65, y: 0.65 },
+  { x: 0.45, y: 0.45 },
+  { x: 0.55, y: 0.45 },
+];
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+type AutoRead =
+  | { readonly ok: true; readonly state: ReturnType<typeof parseBattleState> }
+  | { readonly ok: false; readonly error: string };
+
+async function readState(session: ArknightsSession, cfg: ArknightsConfigSection): Promise<AutoRead> {
+  const shot = await session.screencap();
+  if (!shot.ok) return { ok: false, error: shot.error };
+  const ocr = await session.recognizeFrame(shot.png, cfg.resourceDir);
+  if (!ocr.ok) return { ok: false, error: ocr.error };
+  return { ok: true, state: parseBattleState(ocr.lines) };
+}
+
+/**
+ * 本地自动打一局：固定策略，不调任何模型。
+ *
+ * 策略很朴素——费用够就下最左边那张、往候选地块轮流试，靠「费用有没有掉」判断落位，
+ * 认到结算就停。它的用途是验收整条链路（读状态 → 部署 → 再读 → 结算），不是打通关。
+ */
+async function runAuto(
+  session: ArknightsSession,
+  cfg: ArknightsConfigSection,
+  tiles: ReadonlyArray<{ x: number; y: number }>,
+  maxSteps: number,
+): Promise<void> {
+  console.log(`[auto] 本地自动打：最多 ${maxSteps} 步，${tiles.length} 个候选地块，落位靠费用变化判断。`);
+  for (let step = 1; step <= maxSteps; step += 1) {
+    const read = await readState(session, cfg);
+    if (!read.ok) {
+      console.log(`[auto ${step}] 读状态失败：${read.error}`);
+      return;
+    }
+    const { state } = read;
+    console.log(
+      `[auto ${step}] ${state.result ?? '对局中'}｜费用 ${state.cost ?? '?'}｜生命 ${state.life ?? '?'}`
+        + `｜敌人 ${state.enemies ?? '?'}｜手牌 ${state.handCosts.length || '?'} 张`,
+    );
+    if (state.result) {
+      console.log(`[auto] 已结算：${state.result === 'victory' ? '胜利' : '失败'}`);
+      return;
+    }
+
+    const size = session.resolution;
+    if (!size) {
+      console.log('[auto] 拿不到画面尺寸，等一秒再试');
+      await sleep(1000);
+      continue;
+    }
+
+    if (state.paused === true) {
+      const point = pausePoint(cfg.pauseButton, size);
+      console.log(`[auto] 画面在暂停，点 (${point.x}, ${point.y}) 继续`);
+      await session.click(point.x, point.y);
+      await sleep(900);
+      continue;
+    }
+
+    const affordable = state.cost === null ? [] : state.handCosts.filter((card) => card.cost <= state.cost!);
+    if (affordable.length === 0) {
+      console.log(`[auto] 费用 ${state.cost ?? '?'} 不够下任何一张，等 3 秒`);
+      await sleep(3000);
+      continue;
+    }
+
+    const card = affordable[0]!;
+    const tile = tiles[(step - 1) % tiles.length]!;
+    const planned = planDeploy({ x: Math.min(0.98, card.x + 0.02), y: 0.9 }, tile, 'right', size);
+    if (!planned.ok) {
+      console.log(`[auto] 计划被拒：${planned.error}`);
+      continue;
+    }
+    const { plan } = planned;
+    const picked = await session.swipe(plan.card.x, plan.card.y, plan.tile.x, plan.tile.y, plan.holdMs);
+    if (!picked.ok) {
+      console.log(`[auto] 手牌 → 地块没发出去：${picked.error}`);
+      return;
+    }
+    const aimed = await session.swipe(plan.tile.x, plan.tile.y, plan.release.x, plan.release.y, plan.directionMs);
+    if (!aimed.ok) {
+      console.log(`[auto] 定向拖拽没发出去：${aimed.error}`);
+      return;
+    }
+    console.log(
+      `[auto] 下 ${card.cost} 费卡：(${plan.card.x}, ${plan.card.y}) → (${plan.tile.x}, ${plan.tile.y})`
+        + ` → (${plan.release.x}, ${plan.release.y})`,
+    );
+
+    await sleep(1200);
+    const after = await readState(session, cfg);
+    if (after.ok && after.state.cost !== null && state.cost !== null && after.state.cost < state.cost - 3) {
+      console.log(`[auto] 落位成功（费用 ${state.cost} → ${after.state.cost}）`);
+    } else {
+      console.log('[auto] 这次没落位，下一轮换地块再试');
+    }
+  }
+  console.log(`[auto] 到达步数上限 ${maxSteps}，停止（战斗可能还没结束）`);
+}
+
 async function main(): Promise<void> {
   const windowArg = take('window');
   const inputArg = take('input');
@@ -108,6 +238,9 @@ async function main(): Promise<void> {
   const resourceArg = take('resource');
   const deployArg = take('deploy');
   const watchArg = take('watch');
+  const autoArg = take('auto');
+  const autoTilesArg = take('auto-tiles');
+  const autoMaxArg = take('auto-max');
 
   if (deployArg !== undefined && typeof deployArg !== 'string') {
     console.error('--deploy 需要 "手牌x,手牌y,地块x,地块y,朝向"，例如 --deploy 0.1,0.9,0.5,0.5,up');
@@ -162,6 +295,25 @@ async function main(): Promise<void> {
     const watchMs = typeof watchArg === 'string' ? Number(watchArg) : Number.NaN;
     const interval = Number.isFinite(watchMs) && watchMs >= 500 ? Math.min(watchMs, 30_000) : 3000;
     await runWatch(session, cfg, interval);
+    await session.stop();
+    return;
+  }
+
+  if (autoArg !== undefined) {
+    let tiles: ReadonlyArray<{ x: number; y: number }>;
+    try {
+      tiles = typeof autoTilesArg === 'string' ? parseTiles(autoTilesArg) : AUTO_TILES;
+    } catch (error) {
+      if (!(error instanceof ArgError)) throw error;
+      console.error(error.message);
+      console.error('参数写错时不会发送任何点击。');
+      process.exitCode = 2;
+      await session.stop();
+      return;
+    }
+    const rawMax = typeof autoMaxArg === 'string' ? Number(autoMaxArg) : Number.NaN;
+    const maxSteps = Number.isFinite(rawMax) ? Math.max(1, Math.min(80, Math.round(rawMax))) : 30;
+    await runAuto(session, cfg, tiles, maxSteps);
     await session.stop();
     return;
   }

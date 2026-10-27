@@ -136,7 +136,10 @@ Coopanion（Cortico 框架）的 World 扩展：把国服《明日方舟》PC �
 - `ark_battle_state` 的回执会说明「本局已结束（行动结束／胜利）」或「本局失败（作战失败）」，模型据此停下；已经结算时不再列「没读到」，避免拿费用/手牌误导决策。
 - `ark_wait { ms }` 只睡不动作（最多 10 秒），用来等费用回复，比反复截图省 token。
 
-循环与决策规则写在 [`BATTLE_PLAYBOOK.md`](./BATTLE_PLAYBOOK.md)：读状态 → 看结算 → 选牌下干员 → 等费用 → 再看状态。模型在 Coopanion 里按它执行即可——扩展不联网，也不需要任何 API key。
+「自己打完一局」有两层，别混：
+
+- **本地自测**（不经过 Coopanion、不调模型）：`pnpm smoke --auto`。固定策略——费用够就下最左边那张、往候选地块轮流试，靠「费用有没有掉」判断落位，认到结算就停。它验证的是整条链路（读状态 → 部署 → 再读 → 结算），不追求通关质量。
+- **Coopanion 里的模型**：同一套循环由模型执行，决策换成「看画面选牌与地块」。剧本见 [`BATTLE_PLAYBOOK.md`](./BATTLE_PLAYBOOK.md)。
 
 ## 真机冒烟（不经过 Coopanion）
 
@@ -148,6 +151,9 @@ corepack pnpm install
 pnpm smoke                                   # 只截图，存 <前缀>-before.png
 pnpm smoke --state                           # 抓帧 + 识别战场数字，打印原始行与结构化结果
 pnpm smoke --watch                           # 只读循环：每 3 秒读一次，认到结算自动退出
+pnpm smoke --auto                            # 本地自动打一局：固定策略，直到结算
+pnpm smoke --auto --auto-tiles "0.4,0.55;0.5,0.65"   # 自己给候选地块
+pnpm smoke --auto --auto-max 40              # 最多走多少步（默认 30）
 pnpm smoke --ocr                             # 只跑识别，额外打印原始明细（排障用）
 pnpm smoke --click                           # 点配置里的暂停坐标，再存一张 <前缀>-after.png
 pnpm smoke --click 60,555                    # 按像素点一个大目标，用来判断输入有没有送达

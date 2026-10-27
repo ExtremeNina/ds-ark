@@ -3,6 +3,8 @@
 这份剧本配合 World 的六个工具使用：`ark_connect`、`ark_screencap`、`ark_battle_state`、`ark_deploy`、`ark_set_paused`、`ark_wait`。
 模型在 Coopanion 里按它循环，**不需要任何 API key，也不联网**。
 
+> 只想验收整条链路、不想开 Coopanion 时：用本地冒烟脚本 `pnpm smoke --auto`（固定策略、不调模型、认到结算就停）。这份剧本是给 Coopanion 里的模型看的，`--auto` 用的是它下面的简化版策略。
+
 ## 前置
 
 1. 游戏窗口已启动，并且是 16:9（16:10 / 21:9 时暂停坐标会偏，日志会提示一次）。
@@ -65,7 +67,8 @@ ark_deploy { card, tile, direction }
 cd C:\Users\Nina\Desktop\ds-ark\test
 pnpm smoke --state                     # 看读数与是否已结算
 pnpm smoke --watch                     # 只读循环：每 3 秒读一次，结算或按 Ctrl+C 结束
+pnpm smoke --auto                      # 本地自动打一局（固定策略，认到结算退出）
 pnpm smoke --deploy 0.12,0.90,0.45,0.55,right
 ```
 
-`--watch` 只读，不会替你下干员；它用来确认「结算能认出来」和「读数在动」。
+`--watch` 只读，不会替你下干员；`--auto` 会真的下干员（固定策略，落位靠费用变化判断）。两个都用来确认「结算能认出来」「读数在动」「部署链路通」。
