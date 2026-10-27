@@ -1,11 +1,13 @@
 /**
- * World 实现：三个工具（连接、截图、暂停/恢复）、一条挂载事件与环境提示词。
- * 工具只描述自己能确认的事实；没有识别能力时不说「已暂停」。
+ * World 实现：五个工具（连接、截图、暂停/恢复、读战场、点选部署）、一条挂载事件与环境提示词。
+ * 工具只描述自己能确认的事实：没有识别能力时不说「已暂停」，拖拽发出后也不说「已部署」。
  */
 import { fileURLToPath } from 'node:url';
 import type { Language } from 'cortico/core/language.ts';
 import type { ToolDef, ToolOutcome, ToolSpec, World, WorldHost, WorldWebUiDecl } from 'cortico/core/types.ts';
 import { nowIso } from 'cortico/core/util.ts';
+import { DEPLOY_DIRECTIONS, planDeploy } from './battle/deploy.ts';
+import { describeBattleState, parseBattleState } from './battle/state.ts';
 import { ARKNIGHTS_CONFIG_GROUP, type ArknightsConfigSection } from './config.ts';
 import { toPoint } from './mfw/geometry.ts';
 import { SCREENSHOT_MIME, screenshotName } from './mfw/screen.ts';
@@ -69,6 +71,56 @@ export const ARKNIGHTS_TOOL_DECLS: ReadonlyArray<ToolSpec> = [
       required: ['paused'],
     },
   },
+  {
+    name: 'ark_battle_state',
+    description:
+      'Capture the current battle frame, read cost, life points, enemies left, the pause banner and the hand '
+      + 'operator costs from it locally, and attach that same frame. Read-only: it never clicks. '
+      + 'Anything the local OCR could not read is listed as missing instead of being reported as zero. '
+      + 'OCR needs worlds.arknights.resourceDir; without it the frame is still returned for you to look at.',
+    tags: ['read'],
+    parameters: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {},
+      required: [],
+    },
+  },
+  {
+    name: 'ark_deploy',
+    description:
+      'Drag one hand card onto a battlefield tile, then drag from that tile towards a direction to deploy an '
+      + 'operator. card and tile are normalised 0-1 points taken from an attached frame; direction is '
+      + 'up/down/left/right. The receipt only states that the drags were sent, and (when verifyAfterClick is on) '
+      + 'attaches the frame captured right after them.',
+    tags: ['act'],
+    parameters: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        card: {
+          type: 'object',
+          additionalProperties: false,
+          description: 'Normalised point on the hand card you want to deploy: x/y are 0-1 of the frame size.',
+          properties: { x: { type: 'number' }, y: { type: 'number' } },
+          required: ['x', 'y'],
+        },
+        tile: {
+          type: 'object',
+          additionalProperties: false,
+          description: 'Normalised point on the battlefield tile to deploy onto.',
+          properties: { x: { type: 'number' }, y: { type: 'number' } },
+          required: ['x', 'y'],
+        },
+        direction: {
+          type: 'string',
+          enum: [...DEPLOY_DIRECTIONS],
+          description: 'Facing to set after the operator is dropped: up, down, left or right.',
+        },
+      },
+      required: ['card', 'tile', 'direction'],
+    },
+  },
 ];
 
 const fail = (text: string): ToolOutcome => ({ text, failed: true });
@@ -85,8 +137,12 @@ export class ArknightsWorld implements World {
   private host: WorldHost | null = null;
 
   constructor(private readonly opts: ArknightsWorldOptions) {
-    // 尺寸不一致只进日志，不进模型上下文：它不是模型需要处理的决策点。
-    this.session = opts.session ?? new ArknightsSession(undefined, (line) => this.host?.log.warn(line));
+    // 尺寸与比例的自检只进日志，不进模型上下文：它们不是模型需要处理的决策点。
+    this.session = opts.session ?? new ArknightsSession(
+      undefined,
+      (line) => this.host?.log.warn(line),
+      (line) => this.host?.log.info(line),
+    );
   }
 
   /** 只报值；前缀文本一律来自 ENV_PROMPT.md。 */
@@ -103,6 +159,10 @@ export class ArknightsWorld implements World {
           return { ...decl, handler: () => this.screencap() };
         case 'ark_set_paused':
           return { ...decl, handler: (args) => this.setPaused(args) };
+        case 'ark_battle_state':
+          return { ...decl, handler: () => this.battleState() };
+        case 'ark_deploy':
+          return { ...decl, handler: (args) => this.deploy(args) };
         default:
           return { ...decl, handler: async () => fail(`未实现的工具：${decl.name}`) };
       }
@@ -200,6 +260,65 @@ export class ArknightsWorld implements World {
       + '（端点不接受图片时只发送这句，请再调用 ark_screencap 确认）。';
     return {
       text: `${receipt}附件是点击之后抓的一帧，请据此判断是否真的${action}；World 自己不做识别，也不会替你下结论。`,
+      blobs: [frameBlob(after.png, fallbackText)],
+    };
+  }
+
+  /** 只读：抓一帧，能识别就报数，识别不了就退回「你自己看图」。全程不发点击。 */
+  private async battleState(): Promise<ToolOutcome> {
+    if (!this.session.connected) return fail('读取战场失败：还没连接游戏窗口，先调用 ark_connect。');
+    const shot = await this.session.screencap();
+    if (!shot.ok) return fail(shot.error);
+
+    const size = this.session.resolution;
+    const label = size ? `${size[0]}×${size[1]}` : '尺寸未知';
+    const fallbackText = `明日方舟战场帧，${label}，PNG ${shot.png.byteLength} 字节（端点不接受图片时只发送这句）。`;
+    const ocr = await this.session.recognize(shot.png, this.opts.cfg.resourceDir);
+    if (!ocr.ok) {
+      return {
+        text: `已抓取一帧，${label}。这次读不出战场数字（${ocr.error}）。附件就是这一帧，请自己看图判断；`
+          + '这是只读取帧，没有向游戏发任何点击。',
+        blobs: [frameBlob(shot.png, fallbackText)],
+      };
+    }
+
+    const state = parseBattleState(ocr.lines);
+    return {
+      text: `已抓取一帧，${label}。${describeBattleState(state)}`
+        + '这是只读取帧，没有向游戏发任何点击；暂停/继续请用 ark_set_paused。',
+      blobs: [frameBlob(shot.png, fallbackText)],
+    };
+  }
+
+  /** 点选式部署：模型给归一化坐标与朝向，这里只负责把两次拖拽发出去。 */
+  private async deploy(args: Record<string, unknown>): Promise<ToolOutcome | string> {
+    if (!this.session.connected) return fail('部署失败：还没连接游戏窗口，先调用 ark_connect。');
+    const size = this.session.resolution;
+    if (!size) return fail('部署失败：还没拿到画面尺寸，先调用 ark_screencap 取一帧。');
+
+    const planned = planDeploy(args.card, args.tile, args.direction, size);
+    if (!planned.ok) return fail(planned.error);
+    const { plan } = planned;
+
+    const picked = await this.session.swipe(plan.card.x, plan.card.y, plan.tile.x, plan.tile.y, plan.holdMs);
+    if (!picked.ok) return fail(`${picked.error}（手牌 → 地块这一步没发出去，因此没有发定向拖拽）`);
+    const aimed = await this.session.swipe(plan.tile.x, plan.tile.y, plan.release.x, plan.release.y, plan.directionMs);
+    if (!aimed.ok) return fail(`${aimed.error}（已经拖到 (${plan.tile.x}, ${plan.tile.y})，但定向拖拽没发出去）`);
+
+    const receipt = `已从 (${plan.card.x}, ${plan.card.y}) 拖到 (${plan.tile.x}, ${plan.tile.y})，`
+      + `再拖到 (${plan.release.x}, ${plan.release.y}) 定朝向（按 ${size[0]}×${size[1]} 换算）。`;
+    if (!this.opts.cfg.verifyAfterClick) {
+      return `${receipt}这是拖拽回执，无法确认干员是否落位；需要确认请再调用 ark_screencap 自己看。`;
+    }
+
+    const after = await this.session.screencap();
+    if (!after.ok) return `${receipt}补拍失败（${after.error}），无法提供拖拽后的画面，请自行确认游戏状态。`;
+    const afterSize = this.session.resolution ?? size;
+    const fallbackText = `部署拖拽后的一帧，${afterSize[0]}×${afterSize[1]}，PNG ${after.png.byteLength} 字节`
+      + '（端点不接受图片时只发送这句，请再调用 ark_screencap 确认）。';
+    return {
+      text: `${receipt}附件是拖拽之后的一帧，请据此判断是否落位成功、朝向是否正确；`
+        + 'World 自己不做识别，也不会替你下结论。',
       blobs: [frameBlob(after.png, fallbackText)],
     };
   }

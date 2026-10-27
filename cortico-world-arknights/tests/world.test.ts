@@ -9,7 +9,16 @@ import { ARKNIGHTS } from '../src/definition.ts';
 import { ARKNIGHTS_CONFIG_GROUP, ARKNIGHTS_DEFAULTS } from '../src/config.ts';
 import { ArknightsWorld } from '../src/world.ts';
 import { ArknightsSession, resolveMethod } from '../src/mfw/session.ts';
-import type { MaaControllerLike, MaaDesktopDevice, MaaImageJobLike, MaaJobLike, MaaModule } from '../src/mfw/native.ts';
+import type {
+  MaaControllerLike,
+  MaaDesktopDevice,
+  MaaImageJobLike,
+  MaaJobLike,
+  MaaModule,
+  MaaResourceLike,
+  MaaTaskerLike,
+  MaaTaskJobLike,
+} from '../src/mfw/native.ts';
 import { FakeHost } from './helpers/fake-host.ts';
 
 const PACKAGE_DIR = fileURLToPath(new URL('..', import.meta.url));
@@ -37,6 +46,7 @@ function jobOf(succeeded: boolean, status = succeeded ? 1 : 0): MaaJobLike {
 class FakeController implements MaaControllerLike {
   static devices: readonly MaaDesktopDevice[] = [];
   static clicks: Array<[number, number]> = [];
+  static swipes: Array<{ from: [number, number]; to: [number, number]; duration: number }> = [];
   static created: FakeController[] = [];
   /** 模拟「连上了但读不到尺寸」与「抓到的画面是空的」两种坏情况。 */
   static noResolution = false;
@@ -71,6 +81,11 @@ class FakeController implements MaaControllerLike {
     return jobOf(true);
   }
 
+  post_swipe(x1: number, y1: number, x2: number, y2: number, duration: number): MaaJobLike {
+    FakeController.swipes.push({ from: [x1, y1], to: [x2, y2], duration });
+    return jobOf(true);
+  }
+
   post_screencap(): MaaImageJobLike {
     let self: MaaImageJobLike;
     self = { wait: async () => self, get: () => (FakeController.emptyImage ? null : imageBytes) };
@@ -82,10 +97,80 @@ class FakeController implements MaaControllerLike {
   }
 }
 
+/** 假资源：记录试过的路径，可整体失败，用来覆盖「没模型」「加载失败」两条降级路径。 */
+class FakeResource implements MaaResourceLike {
+  static paths: string[] = [];
+  static failAll = false;
+  static instances: FakeResource[] = [];
+  loaded = false;
+
+  constructor() {
+    FakeResource.instances.push(this);
+  }
+
+  post_ocr_model(path: string): MaaJobLike {
+    FakeResource.paths.push(path);
+    this.loaded = !FakeResource.failAll;
+    const job: MaaJobLike = { succeeded: this.loaded, status: this.loaded ? 1 : 0, wait: async () => job };
+    return job;
+  }
+
+  destroy(): void {
+    this.loaded = false;
+  }
+}
+
+/** 假任务器：`post_recognition` 回一段写死的明细，形状与 maa-node 的 RecoDetail 一致。 */
+class FakeTasker implements MaaTaskerLike {
+  /** 识别结果，坐标是帧内像素，由用例按 1280×720 布置。 */
+  static entries: Array<{ text: string; box: [number, number, number, number] }> = [];
+  static created: FakeTasker[] = [];
+  resource: MaaResourceLike | null = null;
+  controller: MaaControllerLike | null = null;
+
+  constructor() {
+    FakeTasker.created.push(this);
+  }
+
+  post_recognition(_type: string, _param: Record<string, unknown>, _image: ArrayBuffer): MaaTaskJobLike {
+    const job: MaaTaskJobLike = {
+      id: 1,
+      succeeded: true,
+      status: 1,
+      wait: async () => job,
+      get: () => ({ entry: 'demo', nodes: [7], status: 1 }),
+    };
+    return job;
+  }
+
+  node_detail(_id: number): unknown {
+    return {
+      name: 'demo',
+      reco: {
+        name: 'OCR',
+        algorithm: 'OCR',
+        hit: true,
+        box: [0, 0, 0, 0],
+        detail: { all: FakeTasker.entries, filtered: FakeTasker.entries, best: null },
+      },
+      action: null,
+      completed: true,
+    };
+  }
+
+  recognition_detail(_id: number): unknown {
+    return null;
+  }
+
+  destroy(): void {}
+}
+
 const fakeMaa: MaaModule = {
   Win32Controller: FakeController as unknown as MaaModule['Win32Controller'],
   Win32ScreencapMethod: { Background: '18', FramePool: '2', PrintWindow: '8' },
   Win32InputMethod: { SendMessage: '1', PostMessage: '2', AnchoredTouch: '32' },
+  Resource: FakeResource,
+  Tasker: FakeTasker,
 };
 
 let scratchDir: string;
@@ -97,9 +182,15 @@ beforeEach(() => {
     ['0x2', 'Notepad', '无标题 - 记事本'],
   ];
   FakeController.clicks = [];
+  FakeController.swipes = [];
   FakeController.created = [];
   FakeController.noResolution = false;
   FakeController.emptyImage = false;
+  FakeResource.paths = [];
+  FakeResource.failAll = false;
+  FakeResource.instances = [];
+  FakeTasker.entries = [];
+  FakeTasker.created = [];
   imageBytes = pngHeader(1280, 720);
 });
 
@@ -201,6 +292,8 @@ describe('明日方舟 World', () => {
     const cases: Array<[string, Record<string, unknown>]> = [
       ['ark_screencap', {}],
       ['ark_set_paused', { paused: true }],
+      ['ark_battle_state', {}],
+      ['ark_deploy', { card: { x: 0.5, y: 0.5 }, tile: { x: 0.5, y: 0.5 }, direction: 'up' }],
     ];
     for (const [name, args] of cases) {
       const outcome = receipt(await toolOf(world, name).handler(args, call));
@@ -382,5 +475,140 @@ describe('明日方舟 World', () => {
     const again = receipt(await toolOf(world, 'ark_connect').handler({}, call));
     expect(again.failed).toBeUndefined();
     expect(again.text).toContain('1280×720');
+  });
+
+  it('读战场：识别到数字就逐项报出，并附上同一帧，全程不点击', async () => {
+    FakeTasker.entries = [
+      { text: '0/11', box: [480, 10, 60, 24] },
+      { text: '20', box: [660, 8, 30, 26] },
+      { text: '28', box: [1190, 560, 40, 30] },
+      { text: '12', box: [40, 668, 24, 20] },
+      { text: '16', box: [300, 668, 24, 20] },
+    ];
+    const { ctx, world } = newWorld();
+    Object.assign(ctx.cfg, { resourceDir: 'C:\\fake-maa' });
+    await toolOf(world, 'ark_connect').handler({}, call);
+
+    const outcome = receipt(await toolOf(world, 'ark_battle_state').handler({}, call));
+    expect(outcome.failed).toBeUndefined();
+    expect(outcome.text).toContain('费用 28');
+    expect(outcome.text).toContain('生命 20');
+    expect(outcome.text).toContain('剩余敌人 0/11');
+    expect(outcome.text).toContain('手牌费用从左到右 12 / 16');
+    expect(outcome.text).toContain('没有向游戏发任何点击');
+    expect(outcome.text).not.toContain('已暂停');
+    expect(outcome.blobs).toHaveLength(1);
+    const blob = outcome.blobs![0]!;
+    if (!('bytes' in blob)) throw new Error('应当是字节附件');
+    expect(blob.mime).toBe('image/png');
+    expect(FakeController.clicks).toEqual([]);
+    // 只加载一次模型，后续调用复用
+    expect(FakeResource.instances).toHaveLength(1);
+  });
+
+  it('读战场：认到暂停横幅只描述画面，并声明数字可能不准', async () => {
+    FakeTasker.entries = [
+      { text: 'PAUSE', box: [560, 300, 160, 50] },
+      { text: '28', box: [1190, 560, 40, 30] },
+    ];
+    const { ctx, world } = newWorld();
+    Object.assign(ctx.cfg, { resourceDir: 'C:\\fake-maa' });
+    await toolOf(world, 'ark_connect').handler({}, call);
+
+    const outcome = receipt(await toolOf(world, 'ark_battle_state').handler({}, call));
+    expect(outcome.text).toContain('暂停横幅');
+    expect(outcome.text).toContain('请以附件画面为准');
+    expect(outcome.text).toContain('没读到：生命值、剩余敌人、手牌费用');
+    expect(outcome.text).not.toContain('已暂停');
+  });
+
+  it('读战场：没配 resourceDir 时降级为只看图，不报失败', async () => {
+    const { world } = newWorld();
+    await toolOf(world, 'ark_connect').handler({}, call);
+
+    const outcome = receipt(await toolOf(world, 'ark_battle_state').handler({}, call));
+    expect(outcome.failed).toBeUndefined();
+    expect(outcome.text).toContain('这台机器上没有配置 OCR');
+    expect(outcome.blobs).toHaveLength(1);
+  });
+
+  it('读战场：模型加载失败时把试过的路径写进回执，仍然给图', async () => {
+    FakeResource.failAll = true;
+    const { ctx, world } = newWorld();
+    Object.assign(ctx.cfg, { resourceDir: 'C:\\no-model' });
+    await toolOf(world, 'ark_connect').handler({}, call);
+
+    const outcome = receipt(await toolOf(world, 'ark_battle_state').handler({}, call));
+    expect(outcome.failed).toBeUndefined();
+    expect(outcome.text).toContain('识别不可用');
+    expect(outcome.text).toContain('model');
+    expect(outcome.blobs).toHaveLength(1);
+    expect(FakeResource.paths).toHaveLength(3);
+  });
+
+  it('部署：两次拖拽的端点与时长都对，并补拍一帧', async () => {
+    const { world } = newWorld();
+    await toolOf(world, 'ark_connect').handler({}, call);
+
+    const outcome = receipt(await toolOf(world, 'ark_deploy').handler(
+      { card: { x: 0.1, y: 0.9 }, tile: { x: 0.5, y: 0.5 }, direction: 'up' },
+      call,
+    ));
+    expect(outcome.failed).toBeUndefined();
+    expect(FakeController.swipes).toEqual([
+      { from: [128, 647], to: [640, 360], duration: 260 },
+      { from: [640, 360], to: [640, 281], duration: 160 },
+    ]);
+    expect(outcome.text).toContain('拖拽之后的一帧');
+    expect(outcome.text).not.toContain('已部署');
+    expect(outcome.blobs).toHaveLength(1);
+  });
+
+  it('部署：关掉 verifyAfterClick 时退回纯文字回执', async () => {
+    const { ctx, world } = newWorld();
+    Object.assign(ctx.cfg, { verifyAfterClick: false });
+    await toolOf(world, 'ark_connect').handler({}, call);
+
+    const outcome = receipt(await toolOf(world, 'ark_deploy').handler(
+      { card: { x: 0.1, y: 0.9 }, tile: { x: 0.5, y: 0.5 }, direction: 'left' },
+      call,
+    ));
+    expect(outcome.blobs).toBeUndefined();
+    expect(outcome.text).toContain('ark_screencap');
+  });
+
+  it('部署：参数不合法时拒绝，一次手势都不发', async () => {
+    const { world } = newWorld();
+    await toolOf(world, 'ark_connect').handler({}, call);
+
+    const cases: Array<Record<string, unknown>> = [
+      { card: { x: 1.4, y: 0.5 }, tile: { x: 0.5, y: 0.5 }, direction: 'up' },
+      { card: { x: 0.5, y: 0.5 }, tile: { x: 0.5, y: 0.5 }, direction: 'north' },
+      {},
+    ];
+    for (const args of cases) {
+      const outcome = receipt(await toolOf(world, 'ark_deploy').handler(args, call));
+      expect(outcome.failed, JSON.stringify(args)).toBe(true);
+    }
+    expect(FakeController.swipes).toEqual([]);
+  });
+
+  it('部署：绑定没有 post_swipe 时给可读原因，而不是崩在 TypeError 上', async () => {
+    const { world } = newWorld();
+    await toolOf(world, 'ark_connect').handler({}, call);
+
+    const proto = FakeController.prototype as unknown as Record<string, unknown>;
+    const original = proto.post_swipe;
+    delete proto.post_swipe;
+    try {
+      const outcome = receipt(await toolOf(world, 'ark_deploy').handler(
+        { card: { x: 0.1, y: 0.9 }, tile: { x: 0.5, y: 0.5 }, direction: 'up' },
+        call,
+      ));
+      expect(outcome.failed).toBe(true);
+      expect(outcome.text).toContain('post_swipe');
+    } finally {
+      proto.post_swipe = original;
+    }
   });
 });

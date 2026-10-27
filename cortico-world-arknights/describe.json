@@ -57,14 +57,97 @@
         "zh": "向配置的暂停按钮位置发一次点击，暂停或继续战斗。",
         "en": "Sends one click to the configured pause button to pause or resume the battle."
       }
+    },
+    {
+      "name": "ark_battle_state",
+      "description": "Capture the current battle frame, read cost, life points, enemies left, the pause banner and the hand operator costs from it locally, and attach that same frame. Read-only: it never clicks. Anything the local OCR could not read is listed as missing instead of being reported as zero. OCR needs worlds.arknights.resourceDir; without it the frame is still returned for you to look at.",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {},
+        "required": []
+      },
+      "tags": [
+        "read"
+      ],
+      "summary": {
+        "zh": "抓取当前帧并读取费用、生命值、剩余敌人、暂停横幅与手牌费用；识别不到的项如实列为缺失。",
+        "en": "Captures the frame and reads cost, life points, enemies left, the pause banner and hand costs; unreadable fields are reported as missing."
+      }
+    },
+    {
+      "name": "ark_deploy",
+      "description": "Drag one hand card onto a battlefield tile, then drag from that tile towards a direction to deploy an operator. card and tile are normalised 0-1 points taken from an attached frame; direction is up/down/left/right. The receipt only states that the drags were sent, and (when verifyAfterClick is on) attaches the frame captured right after them.",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "card": {
+            "type": "object",
+            "additionalProperties": false,
+            "description": "Normalised point on the hand card you want to deploy: x/y are 0-1 of the frame size.",
+            "properties": {
+              "x": {
+                "type": "number"
+              },
+              "y": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "x",
+              "y"
+            ]
+          },
+          "tile": {
+            "type": "object",
+            "additionalProperties": false,
+            "description": "Normalised point on the battlefield tile to deploy onto.",
+            "properties": {
+              "x": {
+                "type": "number"
+              },
+              "y": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "x",
+              "y"
+            ]
+          },
+          "direction": {
+            "type": "string",
+            "enum": [
+              "up",
+              "down",
+              "left",
+              "right"
+            ],
+            "description": "Facing to set after the operator is dropped: up, down, left or right."
+          }
+        },
+        "required": [
+          "card",
+          "tile",
+          "direction"
+        ]
+      },
+      "tags": [
+        "act"
+      ],
+      "summary": {
+        "zh": "把手牌拖到战场地块并拖出朝向，完成一次干员部署；回执只说明拖拽已发出。",
+        "en": "Drags one hand card onto a battlefield tile and sets the facing; the receipt only states that the drags were sent."
+      }
     }
   ],
   "events": [
     {
       "type": "arknights.ready",
       "description": {
-        "zh": "World 挂载完成，三个工具可用；此时尚未连接游戏窗口。",
-        "en": "The World was mounted and its three tools are available; the game window is not connected yet."
+        "zh": "World 挂载完成，五个工具可用；此时尚未连接游戏窗口。",
+        "en": "The World was mounted and its five tools are available; the game window is not connected yet."
       }
     }
   ],

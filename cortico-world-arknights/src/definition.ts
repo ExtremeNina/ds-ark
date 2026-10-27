@@ -27,13 +27,21 @@ export const ARKNIGHTS: WorldDefinition<ArknightsConfigSection> = {
         zh: '向配置的暂停按钮位置发一次点击，暂停或继续战斗。',
         en: 'Sends one click to the configured pause button to pause or resume the battle.',
       },
+      ark_battle_state: {
+        zh: '抓取当前帧并读取费用、生命值、剩余敌人、暂停横幅与手牌费用；识别不到的项如实列为缺失。',
+        en: 'Captures the frame and reads cost, life points, enemies left, the pause banner and hand costs; unreadable fields are reported as missing.',
+      },
+      ark_deploy: {
+        zh: '把手牌拖到战场地块并拖出朝向，完成一次干员部署；回执只说明拖拽已发出。',
+        en: 'Drags one hand card onto a battlefield tile and sets the facing; the receipt only states that the drags were sent.',
+      },
     }),
     events: [
       {
         type: 'arknights.ready',
         description: {
-          zh: 'World 挂载完成，三个工具可用；此时尚未连接游戏窗口。',
-          en: 'The World was mounted and its three tools are available; the game window is not connected yet.',
+          zh: 'World 挂载完成，五个工具可用；此时尚未连接游戏窗口。',
+          en: 'The World was mounted and its five tools are available; the game window is not connected yet.',
         },
       },
     ],
