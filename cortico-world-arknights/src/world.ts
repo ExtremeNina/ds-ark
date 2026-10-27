@@ -316,17 +316,24 @@ export class ArknightsWorld implements World {
     const size = this.session.resolution;
     if (!size) return fail('部署失败：还没拿到画面尺寸，先调用 ark_screencap 取一帧。');
 
-    const planned = planDeploy(args.card, args.tile, args.direction, size);
+    const cfg = this.opts.cfg;
+    const planned = planDeploy(args.card, args.tile, args.direction, size, {
+      holdMs: cfg.deployHoldMs,
+      gapMs: cfg.deployGapMs,
+      directionMs: cfg.deployDirectionMs,
+    });
     if (!planned.ok) return fail(planned.error);
     const { plan } = planned;
 
     const picked = await this.session.swipe(plan.card.x, plan.card.y, plan.tile.x, plan.tile.y, plan.holdMs);
     if (!picked.ok) return fail(`${picked.error}（手牌 → 地块这一步没发出去，因此没有发定向拖拽）`);
+    if (plan.gapMs > 0) await new Promise((resolve) => setTimeout(resolve, plan.gapMs));
     const aimed = await this.session.swipe(plan.tile.x, plan.tile.y, plan.release.x, plan.release.y, plan.directionMs);
     if (!aimed.ok) return fail(`${aimed.error}（已经拖到 (${plan.tile.x}, ${plan.tile.y})，但定向拖拽没发出去）`);
 
     const receipt = `已从 (${plan.card.x}, ${plan.card.y}) 拖到 (${plan.tile.x}, ${plan.tile.y})，`
-      + `再拖到 (${plan.release.x}, ${plan.release.y}) 定朝向（按 ${size[0]}×${size[1]} 换算）。`;
+      + `再拖到 (${plan.release.x}, ${plan.release.y}) 定朝向`
+      + `（按 ${size[0]}×${size[1]} 换算；按住 ${plan.holdMs}ms，间隔 ${plan.gapMs}ms，定向 ${plan.directionMs}ms）。`;
     if (!this.opts.cfg.verifyAfterClick) {
       return `${receipt}这是拖拽回执，无法确认干员是否落位；需要确认请再调用 ark_screencap 自己看。`;
     }

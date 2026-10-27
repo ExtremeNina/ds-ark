@@ -24,8 +24,17 @@ export interface DeployPlan {
   readonly release: DeployPoint;
   /** 第一步拖拽时长（毫秒）。 */
   readonly holdMs: number;
+  /** 两步之间的停顿（毫秒）：给游戏留出进入「选朝向」状态的时间。 */
+  readonly gapMs: number;
   /** 第二步定向拖拽时长（毫秒）。 */
   readonly directionMs: number;
+}
+
+/** 可调的拖拽时序；不传就用默认值，行为与旧版本一致。 */
+export interface DeployTiming {
+  readonly holdMs?: number;
+  readonly gapMs?: number;
+  readonly directionMs?: number;
 }
 
 export type DeployResult = { readonly ok: true; readonly plan: DeployPlan } | { readonly ok: false; readonly error: string };
@@ -35,6 +44,12 @@ const HOLD_MS = 260;
 const DIRECTION_MS = 160;
 /** 定向位移相对画面高度的比例：720 高约 79 像素，够触发方向选择又不至于滑出屏幕。 */
 const DIRECTION_OFFSET_RATIO = 0.11;
+
+/** 毫秒参数的兜底：非数字、负数走默认值，超过上限就夹住，避免把工具卡死。 */
+function clampMs(value: unknown, fallback: number, max: number): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return fallback;
+  return Math.min(max, Math.max(0, Math.round(value)));
+}
 
 function isUnit(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 1;
@@ -56,6 +71,7 @@ export function planDeploy(
   tile: unknown,
   direction: unknown,
   size: readonly [number, number],
+  timing?: DeployTiming,
 ): DeployResult {
   const [width, height] = size;
   if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) {
@@ -94,6 +110,14 @@ export function planDeploy(
 
   return {
     ok: true,
-    plan: { card: cardPx, tile: tilePx, release, holdMs: HOLD_MS, directionMs: DIRECTION_MS },
+    plan: {
+      card: cardPx,
+      tile: tilePx,
+      release,
+      // 上限 5 秒：拖拽本来就是毫秒级动作，配错成 60000 不该把一次调用挂在那儿。
+      holdMs: clampMs(timing?.holdMs, HOLD_MS, 5000),
+      gapMs: clampMs(timing?.gapMs, 0, 3000),
+      directionMs: clampMs(timing?.directionMs, DIRECTION_MS, 5000),
+    },
   };
 }

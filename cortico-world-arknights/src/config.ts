@@ -48,6 +48,12 @@ export interface ArknightsConfigSection {
   verifyAfterClick: boolean;
   /** 可选：用别的目录覆盖包内 OCR 模型。留空即用包内模型，不做识别以外的任何加载。 */
   resourceDir: string;
+  /** 部署第一步（手牌 → 地块）按住拖拽的时长，毫秒。太短会被游戏当成点击。 */
+  deployHoldMs: number;
+  /** 两步拖拽之间的停顿，毫秒。给游戏留出进入「选朝向」状态的时间。 */
+  deployGapMs: number;
+  /** 第二步（地块 → 朝向）拖拽的时长，毫秒。 */
+  deployDirectionMs: number;
 }
 
 export const ARKNIGHTS_DEFAULTS: ArknightsConfigSection = {
@@ -61,6 +67,11 @@ export const ARKNIGHTS_DEFAULTS: ArknightsConfigSection = {
   pauseButton: { x: 0.966, y: 0.071 },
   verifyAfterClick: true,
   resourceDir: '',
+  // 默认值就是此前写死的常量：不配置时行为与 0.2.0 一致，想调慢再改这几项。
+  // 真机上拖拽成功率偏低时，先试 600 / 150 / 250。
+  deployHoldMs: 260,
+  deployGapMs: 0,
+  deployDirectionMs: 160,
 };
 
 /** 配置组的路径必须全部落在 `worlds.arknights.` 段内，且在 `defaults()` 里有对应项。 */
@@ -116,6 +127,34 @@ export const ARKNIGHTS_CONFIG_GROUP: ConfigGroup = {
         description:
           '开启后每次暂停/恢复都会多抓一帧作为附件，让模型自己看有没有生效；'
           + '代价是多一次截图和一张图的 token。',
+        'x-hot': true,
+      },
+      'worlds.arknights.deployHoldMs': {
+        type: 'number',
+        title: '部署 · 按住拖拽时长（ms）',
+        description:
+          '把手牌拖到地块这一步的时长。太短会被游戏当成点击、干员不落位；'
+          + '默认 260，真机成功率低时先试 600。范围 80~5000。',
+        minimum: 80,
+        maximum: 5000,
+        'x-hot': true,
+      },
+      'worlds.arknights.deployGapMs': {
+        type: 'number',
+        title: '部署 · 两步之间的停顿（ms）',
+        description:
+          '拖到地块之后、拖朝向之前的等待。给游戏进入「选朝向」状态的时间，默认 0，'
+          + '成功率低时试 150。范围 0~3000。',
+        minimum: 0,
+        maximum: 3000,
+        'x-hot': true,
+      },
+      'worlds.arknights.deployDirectionMs': {
+        type: 'number',
+        title: '部署 · 定向拖拽时长（ms）',
+        description: '拖出朝向那一步的时长。默认 160，漂移或方向没选中时试 250。范围 80~5000。',
+        minimum: 80,
+        maximum: 5000,
         'x-hot': true,
       },
       'worlds.arknights.resourceDir': {

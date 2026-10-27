@@ -7,6 +7,7 @@
  *   pnpm smoke --auto                           本地自动打一局（固定策略，不需要模型）：下得起就下，直到结算
  *   pnpm smoke --auto --auto-tiles "0.4,0.55;0.5,0.65"   自己给候选地块（默认一张常见清单）
  *   pnpm smoke --auto --auto-max 40             最多走多少步（默认 30）
+ *   pnpm smoke --deploy ... --hold 600 --gap 150 --dir 250   临时改部署时序（毫秒），不写进配置
  *   pnpm smoke --ocr                            只跑识别，额外打印原始识别明细（确认模型路径与返回结构）
  *   pnpm smoke --click                          点配置里的暂停坐标（默认 0.966 / 0.071）
  *   pnpm smoke --click 60,555                   按像素点一个大目标，用来判断输入是否送达
@@ -139,8 +140,12 @@ async function runAuto(
   cfg: ArknightsConfigSection,
   tiles: ReadonlyArray<{ x: number; y: number }>,
   maxSteps: number,
+  timing: { holdMs: number; gapMs: number; directionMs: number },
 ): Promise<void> {
-  console.log(`[auto] 本地自动打：最多 ${maxSteps} 步，${tiles.length} 个候选地块，落位靠费用变化判断。`);
+  console.log(
+    `[auto] 本地自动打：最多 ${maxSteps} 步，${tiles.length} 个候选地块，落位靠费用变化判断；`
+      + `按住 ${timing.holdMs}ms / 间隔 ${timing.gapMs}ms / 定向 ${timing.directionMs}ms。`,
+  );
   for (let step = 1; step <= maxSteps; step += 1) {
     const read = await readState(session, cfg);
     if (!read.ok) {
@@ -181,7 +186,7 @@ async function runAuto(
 
     const card = affordable[0]!;
     const tile = tiles[(step - 1) % tiles.length]!;
-    const planned = planDeploy({ x: Math.min(0.98, card.x + 0.02), y: 0.9 }, tile, 'right', size);
+    const planned = planDeploy({ x: Math.min(0.98, card.x + 0.02), y: 0.9 }, tile, 'right', size, timing);
     if (!planned.ok) {
       console.log(`[auto] 计划被拒：${planned.error}`);
       continue;
@@ -192,6 +197,7 @@ async function runAuto(
       console.log(`[auto] 手牌 → 地块没发出去：${picked.error}`);
       return;
     }
+    if (plan.gapMs > 0) await sleep(plan.gapMs);
     const aimed = await session.swipe(plan.tile.x, plan.tile.y, plan.release.x, plan.release.y, plan.directionMs);
     if (!aimed.ok) {
       console.log(`[auto] 定向拖拽没发出去：${aimed.error}`);
@@ -241,6 +247,9 @@ async function main(): Promise<void> {
   const autoArg = take('auto');
   const autoTilesArg = take('auto-tiles');
   const autoMaxArg = take('auto-max');
+  const holdArg = take('hold');
+  const gapArg = take('gap');
+  const dirArg = take('dir');
 
   if (deployArg !== undefined && typeof deployArg !== 'string') {
     console.error('--deploy 需要 "手牌x,手牌y,地块x,地块y,朝向"，例如 --deploy 0.1,0.9,0.5,0.5,up');
@@ -261,6 +270,15 @@ async function main(): Promise<void> {
       : ARKNIGHTS_DEFAULTS.inputMethod) as ArknightsConfigSection['inputMethod'],
     pauseButton: pauseArg ?? ARKNIGHTS_DEFAULTS.pauseButton,
     resourceDir: typeof resourceArg === 'string' ? resourceArg : ARKNIGHTS_DEFAULTS.resourceDir,
+  };
+
+  /** 命令行优先，其次配置；都缺就落到默认值。 */
+  const msOf = (raw: unknown, fallback: number): number =>
+    typeof raw === 'string' && Number.isFinite(Number(raw)) ? Number(raw) : fallback;
+  const timing = {
+    holdMs: msOf(holdArg, cfg.deployHoldMs),
+    gapMs: msOf(gapArg, cfg.deployGapMs),
+    directionMs: msOf(dirArg, cfg.deployDirectionMs),
   };
 
   const session = new ArknightsSession(
@@ -313,7 +331,7 @@ async function main(): Promise<void> {
     }
     const rawMax = typeof autoMaxArg === 'string' ? Number(autoMaxArg) : Number.NaN;
     const maxSteps = Number.isFinite(rawMax) ? Math.max(1, Math.min(80, Math.round(rawMax))) : 30;
-    await runAuto(session, cfg, tiles, maxSteps);
+    await runAuto(session, cfg, tiles, maxSteps, timing);
     await session.stop();
     return;
   }
@@ -395,7 +413,7 @@ async function main(): Promise<void> {
       `部署目标：手牌 (${cx}, ${cy}) → 地块 (${tx}, ${ty})，朝向 ${String(direction)}`
         + `　画面 ${frameSize[0]}×${frameSize[1]}`,
     );
-    const planned = planDeploy({ x: cx, y: cy }, { x: tx, y: ty }, direction, frameSize);
+    const planned = planDeploy({ x: cx, y: cy }, { x: tx, y: ty }, direction, frameSize, timing);
     if (!planned.ok) {
       console.error(planned.error);
       if (typeof direction !== 'string' || !(DEPLOY_DIRECTIONS as readonly string[]).includes(direction)) {
@@ -408,12 +426,17 @@ async function main(): Promise<void> {
     }
 
     const { plan } = planned;
+    console.log(
+      `  时序：按住 ${plan.holdMs}ms，间隔 ${plan.gapMs}ms，定向 ${plan.directionMs}ms`
+        + '（--hold / --gap / --dir 可临时覆盖，配置里是 deployHoldMs / deployGapMs / deployDirectionMs）',
+    );
     console.log(`  拖拽 1/2：(${plan.card.x}, ${plan.card.y}) → (${plan.tile.x}, ${plan.tile.y})，${plan.holdMs}ms`);
     const picked = await session.swipe(plan.card.x, plan.card.y, plan.tile.x, plan.tile.y, plan.holdMs);
     console.log(picked.ok ? '控制器回执：拖拽 1 已发送' : picked.error);
     if (!picked.ok) process.exitCode = 1;
 
     if (picked.ok) {
+      if (plan.gapMs > 0) await sleep(plan.gapMs);
       console.log(
         `  拖拽 2/2：(${plan.tile.x}, ${plan.tile.y}) → (${plan.release.x}, ${plan.release.y})，${plan.directionMs}ms`,
       );

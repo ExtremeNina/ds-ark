@@ -57,6 +57,7 @@ ark_deploy { card, tile, direction }
 | `ark_battle_state` 说「没找到可用的 OCR 模型」 | 包内三件套缺失 | 检查 `assets/resource/model/ocr/` 是否平铺三件套 |
 | 数字和画面对不上 | OCR 误识 | 以画面为准；必要时 `ark_screencap` 再确认一次 |
 | 部署没反应 | 坐标没落在卡面/地块、费用不足、后台输入被忽略 | 重新截帧确认，再调一次；两次失败就停 |
+| 部署回执 `状态码 4000`，日志里有 `occluded` / `contact is not down` | 目标点被其他窗口盖住（终端、置顶桌宠、输入法候选框），或拖拽太快 | 让游戏窗口露出来/设为置顶；把 `deployHoldMs` 调到 600、`deployGapMs` 调到 150 再试 |
 | 暂停点不中 | 窗口不是 16:9 或暂停坐标没标定 | 改回 16:9，或按 README 重标 `pauseButton` |
 
 ## 手动复核

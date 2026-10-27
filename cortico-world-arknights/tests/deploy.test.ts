@@ -18,7 +18,28 @@ describe('部署几何', () => {
     // 720 高 × 0.11 ≈ 79 像素
     expect(plan.release).toEqual({ x: 640, y: 281 });
     expect(plan.holdMs).toBe(260);
+    expect(plan.gapMs).toBe(0);
     expect(plan.directionMs).toBe(160);
+  });
+
+  it('时序可取配置值；非法值回落默认，超限被夹住', () => {
+    const custom = planOf({ x: 0.1, y: 0.9 }, center, 'up', SIZE, {
+      holdMs: 600,
+      gapMs: 150,
+      directionMs: 250,
+    });
+    expect(custom.holdMs).toBe(600);
+    expect(custom.gapMs).toBe(150);
+    expect(custom.directionMs).toBe(250);
+
+    const messy = planOf({ x: 0.1, y: 0.9 }, center, 'up', SIZE, {
+      holdMs: Number.NaN,
+      gapMs: -5,
+      directionMs: 99_999,
+    });
+    expect(messy.holdMs).toBe(260); // 非数字回落默认
+    expect(messy.gapMs).toBe(0); // 负数夹到 0
+    expect(messy.directionMs).toBe(5000); // 上限
   });
 
   it('四个朝向的偏移方向都对，且偏移量只跟画面高度有关', () => {
