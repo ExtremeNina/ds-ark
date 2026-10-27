@@ -200,11 +200,22 @@ beforeEach(() => {
 
 afterEach(() => rmSync(scratchDir, { recursive: true, force: true }));
 
+/** 造一套「三件套」：校验只看文件是否存在且非空，内容无所谓。 */
+function writeFakeModel(dir: string): void {
+  mkdirSync(dir, { recursive: true });
+  for (const name of ['det.onnx', 'rec.onnx', 'keys.txt']) {
+    writeFileSync(join(dir, name), 'fake');
+  }
+}
+
 function newWorld(maa: MaaModule = fakeMaa, warns: string[] = []) {
   const ctx = fakeWorldContext(ARKNIGHTS, { scratchDir });
   const session = new ArknightsSession(
     async () => ({ ok: true, maa }),
     (line) => warns.push(line),
+    () => {},
+    // 每个用例的内置模型目录都是自己的临时目录：想要「有模型」就自己写三件套。
+    scratchDir,
   );
   const world = new ArknightsWorld({ cfg: ctx.cfg, timezone: ctx.timezone, session });
   return { ctx, world, session, warns };
@@ -489,8 +500,9 @@ describe('明日方舟 World', () => {
       { text: '12', box: [40, 668, 24, 20] },
       { text: '16', box: [300, 668, 24, 20] },
     ];
-    const { ctx, world } = newWorld();
-    Object.assign(ctx.cfg, { resourceDir: 'C:\\fake-maa' });
+    // 不配 resourceDir：内置模型就是默认来源。
+    writeFakeModel(scratchDir);
+    const { world } = newWorld();
     await toolOf(world, 'ark_connect').handler({}, call);
 
     const outcome = receipt(await toolOf(world, 'ark_battle_state').handler({}, call));
@@ -515,8 +527,8 @@ describe('明日方舟 World', () => {
       { text: 'PAUSE', box: [560, 300, 160, 50] },
       { text: '28', box: [1190, 560, 40, 30] },
     ];
-    const { ctx, world } = newWorld();
-    Object.assign(ctx.cfg, { resourceDir: 'C:\\fake-maa' });
+    writeFakeModel(scratchDir);
+    const { world } = newWorld();
     await toolOf(world, 'ark_connect').handler({}, call);
 
     const outcome = receipt(await toolOf(world, 'ark_battle_state').handler({}, call));
@@ -526,48 +538,106 @@ describe('明日方舟 World', () => {
     expect(outcome.text).not.toContain('已暂停');
   });
 
-  it('读战场：没配 resourceDir 时降级为只看图，不报失败', async () => {
+  it('读战场：不配 resourceDir 也能用包内模型识别', async () => {
+    writeFakeModel(scratchDir);
+    FakeTasker.entries = [{ text: '28', box: [1190, 560, 40, 30] }];
+
     const { world } = newWorld();
     await toolOf(world, 'ark_connect').handler({}, call);
 
     const outcome = receipt(await toolOf(world, 'ark_battle_state').handler({}, call));
     expect(outcome.failed).toBeUndefined();
-    expect(outcome.text).toContain('这台机器上没有配置 OCR');
+    expect(outcome.text).toContain('费用 28');
+    expect(FakeResource.paths).toEqual([scratchDir]);
+  });
+
+  it('读战场：包内模型缺失时降级为只看图，且不会把空目录当模型', async () => {
+    const { world } = newWorld();
+    await toolOf(world, 'ark_connect').handler({}, call);
+
+    const outcome = receipt(await toolOf(world, 'ark_battle_state').handler({}, call));
+    expect(outcome.failed).toBeUndefined();
+    expect(outcome.text).toContain('没找到可用的 OCR 模型');
+    expect(outcome.text).toContain('det.onnx');
     expect(outcome.blobs).toHaveLength(1);
+    // 缺件时一次 post_ocr_model 都不该发：MaaFramework 会把它当成功。
+    expect(FakeResource.paths).toEqual([]);
+  });
+
+  it('读战场：0 字节的模型文件不算可用模型', async () => {
+    writeFakeModel(scratchDir);
+    writeFileSync(join(scratchDir, 'det.onnx'), '');
+
+    const { world } = newWorld();
+    await toolOf(world, 'ark_connect').handler({}, call);
+
+    const outcome = receipt(await toolOf(world, 'ark_battle_state').handler({}, call));
+    expect(outcome.text).toContain('det.onnx');
+    expect(FakeResource.paths).toEqual([]);
   });
 
   it('读战场：模型加载失败时把试过的路径写进回执，仍然给图', async () => {
+    writeFakeModel(scratchDir);
     FakeResource.failAll = true;
-    const { ctx, world } = newWorld();
-    Object.assign(ctx.cfg, { resourceDir: 'C:\\no-model' });
+
+    const { world } = newWorld();
     await toolOf(world, 'ark_connect').handler({}, call);
 
     const outcome = receipt(await toolOf(world, 'ark_battle_state').handler({}, call));
     expect(outcome.failed).toBeUndefined();
     expect(outcome.text).toContain('识别不可用');
-    expect(outcome.text).toContain('PaddleOCR');
+    expect(outcome.text).toContain('试过');
     expect(outcome.blobs).toHaveLength(1);
-    expect(FakeResource.paths).toHaveLength(5);
+    expect(FakeResource.paths).toEqual([scratchDir]);
   });
 
-  it('读战场：资源包里 PaddleOCR 优先，且不会先把根目录当成模型', async () => {
-    // MAA 5/6 的真实布局：<根>/PaddleOCR/rec/inference.onnx
-    mkdirSync(join(scratchDir, 'PaddleOCR', 'rec'), { recursive: true });
-    writeFileSync(join(scratchDir, 'PaddleOCR', 'rec', 'inference.onnx'), '');
+  it('读战场：自定义模型目录优先于包内模型', async () => {
+    writeFakeModel(scratchDir);
+    const custom = join(scratchDir, 'custom-model');
+    writeFakeModel(custom);
+    FakeTasker.entries = [{ text: '28', box: [1190, 560, 40, 30] }];
 
     const { ctx, world } = newWorld();
-    Object.assign(ctx.cfg, { resourceDir: scratchDir });
+    Object.assign(ctx.cfg, { resourceDir: custom });
+    await toolOf(world, 'ark_connect').handler({}, call);
+
+    const outcome = receipt(await toolOf(world, 'ark_battle_state').handler({}, call));
+    expect(outcome.text).toContain('费用 28');
+    expect(FakeResource.paths).toEqual([custom]);
+  });
+
+  it('读战场：resourceDir 填资源包根时命中其中的 model/ocr', async () => {
+    const bundle = join(scratchDir, 'bundle');
+    writeFakeModel(join(bundle, 'model', 'ocr'));
+
+    const { ctx, world } = newWorld();
+    Object.assign(ctx.cfg, { resourceDir: bundle });
+    await toolOf(world, 'ark_connect').handler({}, call);
+
+    receipt(await toolOf(world, 'ark_battle_state').handler({}, call));
+    expect(FakeResource.paths).toEqual([join(bundle, 'model', 'ocr')]);
+  });
+
+  it('读战场：自定义目录缺件时跳过，回落到包内模型', async () => {
+    writeFakeModel(scratchDir);
+    const partial = join(scratchDir, 'partial');
+    mkdirSync(partial, { recursive: true });
+    writeFileSync(join(partial, 'det.onnx'), 'x');
+
+    const { ctx, world } = newWorld();
+    Object.assign(ctx.cfg, { resourceDir: partial });
     await toolOf(world, 'ark_connect').handler({}, call);
 
     const outcome = receipt(await toolOf(world, 'ark_battle_state').handler({}, call));
     expect(outcome.failed).toBeUndefined();
-    expect(FakeResource.paths).toEqual([join(scratchDir, 'PaddleOCR')]);
+    expect(FakeResource.paths).toEqual([scratchDir]);
   });
 
   it('读战场：模型加载直接抛错时，回执里既有试过的路径也有最后的原因', async () => {
+    writeFakeModel(scratchDir);
     FakeResource.throwOnLoad = true;
-    const { ctx, world } = newWorld();
-    Object.assign(ctx.cfg, { resourceDir: 'C:\\broken-maa' });
+
+    const { world } = newWorld();
     await toolOf(world, 'ark_connect').handler({}, call);
 
     const outcome = receipt(await toolOf(world, 'ark_battle_state').handler({}, call));

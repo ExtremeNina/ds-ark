@@ -9,10 +9,10 @@ Coopanion（Cortico 框架）的 World 扩展：把国服《明日方舟》PC �
 | `ark_connect` | 枚举本机窗口，按窗口名关键字找到客户端并建立连接，回报窗口名、类名、截图分辨率 | 不启动游戏、不切换账号 |
 | `ark_screencap` | 抓取当前一帧，作为 PNG 附件随回执交给模型 | 不做识别 |
 | `ark_set_paused` | 向配置的暂停按钮位置发一次点击（`true` 暂停 / `false` 继续），默认再补拍一帧作为附件 | 不确认游戏是否真的暂停，只提供点击后的画面供模型自己判断 |
-| `ark_battle_state` | 抓一帧，用本机 MAA 资源包里的 OCR 模型读出费用、生命值、剩余敌人、暂停横幅、手牌费用，并附上同一帧 | 只读，不发任何点击；读不到的项如实列为「没读到」，不当成 0 |
+| `ark_battle_state` | 抓一帧，用包内 PP-OCRv6 模型读出费用、生命值、剩余敌人、暂停横幅、手牌费用，并附上同一帧 | 只读，不发任何点击；读不到的项如实列为「没读到」，不当成 0 |
 | `ark_deploy` | 按模型给的 0~1 归一化坐标把手牌拖到地块、再拖出朝向，默认补拍一帧 | 只说「拖拽已发出」，不确认落位成功；不做网格坐标换算 |
 
-没有自动战斗、不做选关、不做 Copilot 作业回退、不实现「代理指挥」。OCR 只在本地跑，模型来自你本机的 MAA 资源包；不发任何网络请求。
+没有自动战斗、不做选关、不做 Copilot 作业回退、不实现「代理指挥」。OCR 只在本地跑，模型随包提供；不发任何网络请求。
 
 ## 安装到 Coopanion（本机目录）
 
@@ -46,7 +46,7 @@ Coopanion（Cortico 框架）的 World 扩展：把国服《明日方舟》PC �
       "inputMethod": "AnchoredTouch",
       "pauseButton": { "x": 0.966, "y": 0.071 },
       "verifyAfterClick": true,
-      "resourceDir": "D:\\MAA\\resource"
+      "resourceDir": ""
     }
   }
 }
@@ -70,21 +70,13 @@ Coopanion（Cortico 框架）的 World 扩展：把国服《明日方舟》PC �
 
 ## OCR：读战场数字
 
-`ark_battle_state` 会把费用、生命值、剩余敌人、暂停横幅和手牌费用读出来。识别用的是 **MaaFramework 自带的 OCR**，模型来自你本机的 MAA 资源包——扩展不打包模型、不下载模型、不联网：
+`ark_battle_state` 会把费用、生命值、剩余敌人、暂停横幅和手牌费用读出来。识别用的是 **MaaFramework 自带的 OCR**，模型随扩展发布（PP-OCRv6 small，占包体约 20 MB）——不需要安装 MAA、不需要配置、不联网：
 
-1. 把 `resourceDir` 指到资源包根目录（例如 `D:\soft\MAA-v6\resource`）。扩展会按下面的顺序找模型，命中即用：
+1. 安装后即可用。第一次调用 `ark_battle_state` 时会加载模型（约 1~2 秒），之后复用；每次识别在 CPU 上约 0.1~0.3 秒，加上抓帧整体不到半秒。
+2. 想换模型时把 `resourceDir` 指到一个目录：该目录下平铺 `det.onnx` / `rec.onnx` / `keys.txt`，或者填带 `model/ocr` 的资源包根。自定义目录优先，缺件时自动回落到包内模型。
+3. 模型不可用时 `ark_battle_state` **不报失败**：仍然返回那一帧，回执里列出试过的路径与各自缺的文件，模型改看图。
 
-   | 顺序 | 路径 | 适用版本 |
-   |---|---|---|
-   | 1 | `<resourceDir>/PaddleOCR` | **MAA 5/6（实测）**，内含 `det/inference.onnx`、`rec/inference.onnx` 与 `rec/keys.txt` |
-   | 2 | `<resourceDir>/PaddleCharOCR` | 只含英文/数字的模型，读 UI 数字也够用 |
-   | 3 | `<resourceDir>/model/ocr` | 旧版布局（`det.onnx` 平铺） |
-   | 4 | `<resourceDir>/model` | 更旧的整理方式 |
-   | 5 | `<resourceDir>` | 直接把模型目录本身填进配置 |
-
-   目录存在但没有 `.onnx` 文件时会被跳过——`post_ocr_model` 对空目录也回 success，不拦住的话会假装加载成功、直到识别时才报 `det=0 rec=0`。
-2. 重启 Coopanion。第一次调用 `ark_battle_state` 时会加载模型（约 1~2 秒），之后复用；每次识别在 CPU 上约 0.1~0.3 秒，加上抓帧整体不到半秒。
-3. 留空或路径不对时，`ark_battle_state` **不报失败**：仍然返回那一帧，并在回执里说明「这次读不出战场数字」，模型改看图。
+包内模型位于 `assets/resource/model/ocr/`，三个文件必须平铺在这一层——MaaFramework 只按这三个固定文件名查找、不会进入子目录，放错层会在识别阶段表现为 0 行。
 
 扩展只调用 `Resource.post_ocr_model()` 与 `Tasker.post_recognition()`，不加载 pipeline、不接管截图与点击。识别结果按**画面区域**归类（顶部条 / 中央横幅 / 右下费用 / 底部手牌），区间常量在 `src/battle/regions.ts`，注释里写了它们来自 1280×720 真机帧的位置。
 
@@ -99,7 +91,7 @@ Coopanion（Cortico 框架）的 World 扩展：把国服《明日方舟》PC �
 
 进了战斗后跑 `pnpm smoke --state`：它会打印每一行识别结果的文字、归一化坐标、像素坐标与命中的区域名。某项一直「没读到」，就按打印出来的像素坐标去调 `src/battle/regions.ts` 里对应的区间（比如费用其实在 `y = 0.86`，就把 `cost.y` 的下界压到 `0.86` 以下），然后 `pnpm smoke --state` 再验一次。
 
-如果 `[ocr]` 是 **0 行**，先别动 ROI：看 MaaFramework 自己的日志（`ERR ... Failed to load det or rec ... [det=0000000000000000]`）说明模型根本没注册上——路径不对或模型版本与绑定不匹配，与区间无关。此时确认 `[info] OCR 模型加载自 …` 指向的是 `…\PaddleOCR`（或 `…\PaddleCharOCR`），而不是资源包根目录。
+如果 `[ocr]` 是 **0 行**，先别动 ROI：`[info] OCR 模型加载自 …` 应指向 `…\assets\resource\model\ocr`。回执里出现「缺 det.onnx / rec.onnx / keys.txt」说明模型文件没随包发布或被移动；日志里出现 `Failed to load det or rec`（`det=0000000000000000`）说明模型根本没注册上，与区间无关，多半是模型与当前 `maa-node` 版本不兼容——用 `resourceDir` 指向 MaaCommonAssets 的 `ppocr_v4` 模型覆盖后重试。
 
 ## 部署干员：点选式
 
@@ -169,15 +161,15 @@ pnpm check:extension <本包目录>
 | `inputMethod` | `AnchoredTouch` | 取值见 `Win32InputMethod`；实测能命中右上角小按钮且不抢前台，`SendMessage` 系在本客户端点不中 |
 | `pauseButton` | `0.966 / 0.071` | 暂停按钮中心的比例坐标，只在 16:9 下保证 |
 | `verifyAfterClick` | `true` | 暂停/恢复点击后补拍一帧作为附件；关掉可省一次抓帧与一张图的 token |
-| `resourceDir` | 空 | MAA 资源包根目录（MAA 5/6 会自动找其中的 `PaddleOCR`，旧版找 `model/ocr`），也可直接填模型目录。只读 OCR 模型；留空则不识别，`ark_battle_state` 只给图 |
+| `resourceDir` | 空 | 可选覆盖：目录下平铺 `det.onnx` / `rec.onnx` / `keys.txt`，或填带 `model/ocr` 的资源包根。留空即用包内 PP-OCRv6 small 模型 |
 
 ## 接进 Coopanion：完整流程与验收
 
 真机冒烟全绿之后再接线（冒烟只验证底层，不经过 Coopanion）：
 
-1. 本目录 `corepack pnpm install && pnpm test`，确认 76 个用例通过。
+1. 本目录 `corepack pnpm install && pnpm test`，确认全部用例通过。
 2. 扩展页 → 从本机目录安装（`link`）→ **重启 Coopanion 进程**。
-3. World 总览启用「明日方舟」；在配置里填 `resourceDir`（MAA 资源包根目录），保存。
+3. World 总览启用「明日方舟」；`resourceDir` 留空即可（想换模型再填），保存。
 4. 进一场 1-7（或任意已解锁的关卡），让战斗跑起来，然后逐条验收：
 
 | 步骤 | 让大肥鱼做什么 | 判定标准 |
@@ -191,7 +183,7 @@ pnpm check:extension <本包目录>
 
 另外单独验两条降级，确认「不知道」不会被说成「没问题」：
 
-- 把 `resourceDir` 临时清空 → `ark_battle_state` 仍然返回一张图，并说明「这台机器上没有配置 OCR」；它不算失败，模型应当改看图而不是报错停住。
+- 把 `assets/resource/model/ocr/keys.txt` 临时改个名再调用 → `ark_battle_state` 仍然返回一张图，并说明「没找到可用的 OCR 模型…缺 keys.txt」；它不算失败，模型应当改看图而不是报错停住。验完记得改名回来。
 - 战斗中故意让某项落在识别区间之外（比如换了个 UI 布局）→ 回执里出现「没读到：…」，而不是 0。
 
 判定要点：第 4~6 步允许失败一次（拖拽被忽略是已知可能），但**每次失败都要能从附件画面看出「没落位」**——如果回执说拖了、图里却什么都没有，说明手势没送达，先把 `inputMethod` 换成 `AnchoredTouch` 再试，仍失败则停下来查权限与输入方式，不要连发。
@@ -226,7 +218,7 @@ pnpm check:extension <本包目录>
 ## 隐私
 
 - 不读取、不保存、不上传 API Key 或任何凭据；扩展不读 `ctx.secret()`。
-- 不发网络请求，不下载任何资源。OCR 用的模型从 `resourceDir` 指定的本地目录读取，只在本机内存里加载。
+- 不发网络请求，不下载任何资源。OCR 模型随包发布，从 `assets/resource/model/ocr` 读取；`resourceDir` 只是可选覆盖，同样只在本机内存里加载。
 - 截图（含 `ark_set_paused` 与 `ark_deploy` 的补拍）只在本机内存里流转一次：作为工具回执的附件交给 Coopanion，由 Coopanion 决定是否发给**你自己配置的模型端点**。也就是说，**画面会进入模型上下文**——如果不希望画面离开本机，请不要接云端模型，或不要调用 `ark_screencap` / `ark_battle_state` 并把 `verifyAfterClick` 关掉。
 - OCR 结果（费用、生命、敌人、手牌费用）会写进回执文本，随同一次请求进入模型上下文；它不是截图，但同样是画面信息的摘要。
 - 日志只记录连接成功与错误原因，不记录截图内容、窗口句柄、用户目录。
@@ -235,5 +227,6 @@ pnpm check:extension <本包目录>
 
 - 本包从 `Pal-AI-Lab/Cortico` 的 `templates/extension/world` 模板起步，复制时仅改了包名、id、前缀与实现。Cortico 采用 **MIT** 许可证：<https://github.com/Pal-AI-Lab/Cortico>。
 - 运行时依赖 `@maaxyz/maa-node`（作者 nekosu），来自 MaaFramework 仓库：<https://github.com/MaaXYZ/MaaFramework>，采用 **LGPL-3.0**。它以依赖形式安装，不随本包源码分发；其 npm 包内含的 MaaFramework 动态库、OCR 模型与 Agent 二进制同样遵循上游许可。
-- 本包**不携带**任何游戏截图、UI 切片、OCR 模型或 pipeline 资源。`resourceDir` 只指向用户自己的本地资源目录。
+- OCR 模型来自 PaddleOCR 的 **PP-OCRv6 small**（Apache-2.0），经 [MaaCommonAssets](https://github.com/MaaXYZ/MaaCommonAssets)（MIT）转换成 ONNX 后随包发布，位于 `assets/resource/model/ocr/`。
+- 本包**不携带**任何游戏截图、UI 切片或 pipeline 资源。`resourceDir` 只指向用户自己的本地目录。
 - 本包自身许可见 `LICENSE`（MIT）。

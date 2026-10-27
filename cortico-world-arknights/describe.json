@@ -60,7 +60,7 @@
     },
     {
       "name": "ark_battle_state",
-      "description": "Capture the current battle frame, read cost, life points, enemies left, the pause banner and the hand operator costs from it locally, and attach that same frame. Read-only: it never clicks. Anything the local OCR could not read is listed as missing instead of being reported as zero. OCR needs worlds.arknights.resourceDir; without it the frame is still returned for you to look at.",
+      "description": "Capture the current battle frame, read cost, life points, enemies left, the pause banner and the hand operator costs from it locally, and attach that same frame. Read-only: it never clicks. Anything the local OCR could not read is listed as missing instead of being reported as zero. OCR models ship with the extension, so no configuration is needed; worlds.arknights.resourceDir only overrides them. When OCR is unavailable the frame is still returned for you to look at.",
       "parameters": {
         "type": "object",
         "additionalProperties": false,
@@ -156,7 +156,7 @@
       "key": "worlds.arknights.envPrompt",
       "title": "明日方舟 · 环境提示词",
       "role": "envPrompt",
-      "content": "明日方舟 PC 客户端是本机一个可以被截屏、被点击的窗口（当前匹配关键字：{{arknights.windowMatch}}）。使用时机与约束：\n\n- 任何操作前先调用一次 ark_connect。它没成功时先确认游戏是否已经启动、窗口标题是否与上面的关键字相符，再决定是否让用户改配置；不要连续重试同一个调用。\n- 需要看画面时才调用 ark_screencap。每次只取当前一帧，不要连拍轮询：连续截图既不会得到更新的战场信息，也会白白占掉上下文。\n- 要让游戏停住或继续时调用 ark_set_paused，传 true 停、传 false 继续。默认情况下回执会附上点击之后抓的一帧，用那张图自己判断有没有真的暂停或继续；World 不做识别，也不替你下结论。回执没有附带图片时（配置里关了补拍、端点不接受图片，或补拍失败），再调用一次 ark_screencap 确认。\n- 点击与拖拽都可能被游戏直接忽略（后台合成消息、权限不对等都会这样）。用户说「没反应」时，先重新截一帧确认当前状态，不要连续重复调用 ark_set_paused 或 ark_deploy；确认没生效就如实说明可能的原因（坐标没校准、输入方式不适用、游戏与桌宠权限不一致），把处理交给用户。\n- 需要数字类战况时调用 ark_battle_state：它抓一帧、读出费用、生命值、剩余敌人、暂停横幅与手牌费用，并把同一帧作为附件给你。它只读取帧，不点任何东西，也不会替你暂停；识别不到的项会在回执里列为「没读到」。没配 resourceDir 或识别失败时它照样给图，这时直接用眼睛看。数字来自本机 OCR，可能有误，和画面对不上就以画面为准，不要向用户断言精确数值。\n- 要部署干员时调用 ark_deploy：从附件画面里量出手牌位置与目标地块，传 0~1 的归一化坐标 card / tile，再给朝向 up / down / left / right。它只发两次拖拽，回执只说「已拖拽」，落没落位、朝向对不对由你从附件里看。想稳一点就先 ark_set_paused(true) 再部署，部署完 ark_set_paused(false)；拖完先看图再决定下一步，不要连发，姿态不对就重新调一次而不是叠加多次拖拽。\n- 本版认不出干员名字、职业、关卡名、敌人类型和地块坐标：这些只能从画面里看。不要凭画面里的文字猜数值，也不要声称自己已经知道战场布局。\n- 只操作明日方舟窗口。画面仍是 16:9 时换分辨率不必重新校准，坐标会按比例缩放；换成 16:10、21:9 等比例后暂停坐标不再保证，需要用户按 README 的步骤重新标定 pauseButton（日志里会提示一次「不是 16:9」）。\n"
+      "content": "明日方舟 PC 客户端是本机一个可以被截屏、被点击的窗口（当前匹配关键字：{{arknights.windowMatch}}）。使用时机与约束：\n\n- 任何操作前先调用一次 ark_connect。它没成功时先确认游戏是否已经启动、窗口标题是否与上面的关键字相符，再决定是否让用户改配置；不要连续重试同一个调用。\n- 需要看画面时才调用 ark_screencap。每次只取当前一帧，不要连拍轮询：连续截图既不会得到更新的战场信息，也会白白占掉上下文。\n- 要让游戏停住或继续时调用 ark_set_paused，传 true 停、传 false 继续。默认情况下回执会附上点击之后抓的一帧，用那张图自己判断有没有真的暂停或继续；World 不做识别，也不替你下结论。回执没有附带图片时（配置里关了补拍、端点不接受图片，或补拍失败），再调用一次 ark_screencap 确认。\n- 点击与拖拽都可能被游戏直接忽略（后台合成消息、权限不对等都会这样）。用户说「没反应」时，先重新截一帧确认当前状态，不要连续重复调用 ark_set_paused 或 ark_deploy；确认没生效就如实说明可能的原因（坐标没校准、输入方式不适用、游戏与桌宠权限不一致），把处理交给用户。\n- 需要数字类战况时调用 ark_battle_state：它抓一帧、读出费用、生命值、剩余敌人、暂停横幅与手牌费用，并把同一帧作为附件给你。它只读取帧，不点任何东西，也不会替你暂停；识别不到的项会在回执里列为「没读到」。识别失败时它照样给图，这时直接用眼睛看（模型随包提供，正常不需要配置 resourceDir）。数字来自本机 OCR，可能有误，和画面对不上就以画面为准，不要向用户断言精确数值。\n- 要部署干员时调用 ark_deploy：从附件画面里量出手牌位置与目标地块，传 0~1 的归一化坐标 card / tile，再给朝向 up / down / left / right。它只发两次拖拽，回执只说「已拖拽」，落没落位、朝向对不对由你从附件里看。想稳一点就先 ark_set_paused(true) 再部署，部署完 ark_set_paused(false)；拖完先看图再决定下一步，不要连发，姿态不对就重新调一次而不是叠加多次拖拽。\n- 本版认不出干员名字、职业、关卡名、敌人类型和地块坐标：这些只能从画面里看。不要凭画面里的文字猜数值，也不要声称自己已经知道战场布局。\n- 只操作明日方舟窗口。画面仍是 16:9 时换分辨率不必重新校准，坐标会按比例缩放；换成 16:10、21:9 等比例后暂停坐标不再保证，需要用户按 README 的步骤重新标定 pauseButton（日志里会提示一次「不是 16:9」）。\n"
     }
   ]
 }

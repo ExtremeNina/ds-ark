@@ -1,3 +1,12 @@
+## 0.2.0
+
+- 内置 OCR 模型：`assets/resource/model/ocr/` 携带 PP-OCRv6 small（`det.onnx` / `rec.onnx` / `keys.txt`），npm 包体积随之增大，但不再需要本机装 MAA。
+- `worlds.arknights.resourceDir` 从「必须配置」降级为「可选覆盖」：留空即用包内模型；填了就优先用填的目录（平铺三件套，或带 `model/ocr` 的资源包根），缺件时自动回落到包内模型。
+- 模型校验从「目录里有任意 `.onnx`」改为「三件套存在且非空」：`post_ocr_model` 对缺件目录会假成功，直到识别才 0 行，现在缺件直接跳过并在回执里写明缺哪个文件。
+- 删除对 MAA 5/6 `PaddleOCR` / `PaddleCharOCR` 布局的探测：那套 `det/inference.onnx` 与 MaaFramework 的固定文件名不兼容，属于永远失败的候选。
+- 未配置 `resourceDir` 时不再直接返回「这台机器上没有配置 OCR」。
+- 新增 `tests/ocr.test.ts`：候选顺序与去重、内置路径解析、三件套缺件与空文件判定。
+
 ## 0.1.0
 
 - 首个版本：`ark_connect`、`ark_screencap`、`ark_set_paused` 三个工具，挂载事件 `arknights.ready`。

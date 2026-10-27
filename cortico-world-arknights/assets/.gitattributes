@@ -1,0 +1,4 @@
+# 模型文件按原样存取：core.autocrlf 会把 keys.txt 改写成 CRLF，
+# 而识别字典按行读字符，行尾多一个 \r 会让标签全部错位。
+resource/model/ocr/*.onnx binary
+resource/model/ocr/keys.txt -text

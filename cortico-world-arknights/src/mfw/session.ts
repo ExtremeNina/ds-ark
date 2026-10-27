@@ -11,7 +11,7 @@ import {
   type MaaLoadResult,
   type MaaModule,
 } from './native.ts';
-import { ArknightsOcr, type OcrOutcome } from './ocr.ts';
+import { ArknightsOcr, builtinOcrModelDir, type OcrOutcome } from './ocr.ts';
 import { is16by9 } from './geometry.ts';
 import { pickWindow, parseKeywords, describeDevices, type WindowInfo } from './window.ts';
 import { pngSize, toPngBytes } from './screen.ts';
@@ -73,6 +73,8 @@ export class ArknightsSession {
     private readonly load: () => Promise<MaaLoadResult> = loadMaa,
     private readonly warn: (line: string) => void = () => {},
     private readonly info: (line: string) => void = () => {},
+    /** 内置 OCR 模型目录，测试可注入；生产走包内 assets。 */
+    private readonly ocrBuiltinDir: string = builtinOcrModelDir(),
   ) {}
 
   get connected(): boolean {
@@ -294,8 +296,8 @@ export class ArknightsSession {
   }
 
   /**
-   * 对传入的这一帧做 OCR。识别能力是「有就用」：resourceDir 为空、模型缺失、绑定不提供
-   * Resource/Tasker，都折成可读原因，由调用方决定降级成「只看图」。
+   * 对传入的这一帧做 OCR。识别能力是「有就用」：模型缺失、绑定不提供 Resource/Tasker，
+   * 都折成可读原因，由调用方决定降级成「只看图」。`resourceDir` 只用于覆盖包内模型。
    */
   async recognizeFrame(png: Uint8Array, resourceDir: string): Promise<OcrOutcome> {
     const maa = this.maa;
@@ -307,10 +309,7 @@ export class ArknightsSession {
     const frame = pngSize(png);
     const size = frame ?? this.lastFrameSize;
     if (!size) return { ok: false, error: '识别失败：读不出这一帧的像素尺寸。' };
-    if (!resourceDir.trim()) {
-      return { ok: false, error: '这台机器上没有配置 OCR：worlds.arknights.resourceDir 为空。' };
-    }
-    this.ocr ??= new ArknightsOcr(maa, ctrl, (line) => this.info(line));
+    this.ocr ??= new ArknightsOcr(maa, ctrl, (line) => this.info(line), this.ocrBuiltinDir);
     const loaded = await this.ocr.load(resourceDir);
     if (!loaded.ok) return { ok: false, error: `识别不可用：${loaded.error}` };
     return this.ocr.recognize(png, [size.width, size.height]);

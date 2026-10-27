@@ -9,7 +9,7 @@
  *   pnpm smoke --click --input SendMessage      换输入方式（默认 AnchoredTouch）
  *   pnpm smoke --click --pause 0.966,0.071      现场校准暂停坐标（当前默认值）
  *   pnpm smoke --deploy 0.1,0.9,0.5,0.5,up      按归一化坐标部署：手牌x,y、地块x,y、朝向
- *   pnpm smoke --resource D:\MAA\resource       临时指定 MAA 资源包目录（OCR 用）
+ *   pnpm smoke --resource D:\models\ocr           临时指定 OCR 模型目录（覆盖包内模型）
  *   pnpm smoke --window "明日方舟" --shot trial 指定窗口关键字与输出前缀
  *
  * 每次点击/拖拽后自动补拍一张 `<前缀>-after.png`（部署时是 `<前缀>-deploy-after.png`），
@@ -153,14 +153,14 @@ async function main(): Promise<void> {
   }
 
   if (wantsOcr) {
-    if (!cfg.resourceDir.trim()) {
-      console.log('[ocr] 没配资源目录：用 --resource <MAA 资源包根目录> 指定，或写进配置 worlds.arknights.resourceDir。');
+    if (cfg.resourceDir.trim()) {
+      console.log(`[ocr] 自定义模型目录：${cfg.resourceDir}`);
     }
     const ocr = await session.recognizeFrame(before.png, cfg.resourceDir);
     if (!ocr.ok) {
       // 识别不了不算脚本失败：--state 的意义就是看清楚「能读到什么」，降级信息本身也是结果。
       console.log(`[state] 这次读不出战场数字：${ocr.error}`);
-      console.log('[state] 附件就是上面的 before 图，直接用眼睛看；补齐 resourceDir 后再试。');
+      console.log('[state] 附件就是上面的 before 图，直接用眼睛看；确认包内 assets/resource/model/ocr 三件套齐全，或用 --resource 覆盖。');
       if (ocrArg !== undefined) process.exitCode = 1;
     } else {
       if (ocrArg !== undefined) {
@@ -177,8 +177,9 @@ async function main(): Promise<void> {
       }
       if (ocr.debug) console.log(`  （${ocr.debug}）`);
       if (ocr.lines.length === 0) {
-        console.log('  （0 行通常是模型没真正加载：看上面有没有「Failed to load det or rec」；');
-        console.log('    把 --resource 指到含 PaddleOCR 的资源根目录，或直接指到 PaddleOCR 目录。）');
+        console.log('  （0 行通常是模型与 maa-node 版本不兼容：看上面有没有「Failed to load det or rec」，');
+        console.log('    再确认「OCR 模型加载自」指向的是包内 assets/resource/model/ocr；');
+        console.log('    必要时用 --resource 指到 MaaCommonAssets 的 ppocr_v4 模型目录覆盖。）');
       }
 
       const state = parseBattleState(ocr.lines);

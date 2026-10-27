@@ -46,7 +46,7 @@ export interface ArknightsConfigSection {
   pauseButton: { x: number; y: number };
   /** 暂停/恢复点击后是否补拍一帧作为附件，让模型自己看结果。 */
   verifyAfterClick: boolean;
-  /** MAA 资源包根目录：只从中加载 OCR 模型，不加载 pipeline。留空则不做识别。 */
+  /** 可选：用别的目录覆盖包内 OCR 模型。留空即用包内模型，不做识别以外的任何加载。 */
   resourceDir: string;
 }
 
@@ -120,10 +120,11 @@ export const ARKNIGHTS_CONFIG_GROUP: ConfigGroup = {
       },
       'worlds.arknights.resourceDir': {
         type: 'string',
-        title: 'MaaFramework 资源目录',
+        title: 'OCR 模型目录（可选覆盖）',
         description:
-          '填 MAA 资源包根目录（内含 model/ocr）。扩展只读其中的 OCR 模型，不加载 pipeline、不打包模型；'
-          + '留空或路径不对时 ark_battle_state 仍然给图，只是读不出数字。',
+          '留空即用扩展自带的 PP-OCRv6 small 模型，不需要安装 MAA。想换模型时填一个目录：'
+          + '该目录下平铺 det.onnx / rec.onnx / keys.txt，或填带 model/ocr 的资源包根。'
+          + '路径不对时 ark_battle_state 仍然给图，只是读不出数字。',
         'x-hot': false,
         'x-path': { kind: 'directory' },
       },

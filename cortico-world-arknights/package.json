@@ -1,6 +1,6 @@
 {
   "name": "cortico-world-arknights",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "type": "module",
   "description": "Arknights PC client World for Coopanion: find the window, capture the screen, pause and resume",
   "license": "MIT",
@@ -26,6 +26,7 @@
   },
   "files": [
     "src",
+    "assets",
     "README.md",
     "CHANGELOG.md",
     "LICENSE",

@@ -77,7 +77,8 @@ export const ARKNIGHTS_TOOL_DECLS: ReadonlyArray<ToolSpec> = [
       'Capture the current battle frame, read cost, life points, enemies left, the pause banner and the hand '
       + 'operator costs from it locally, and attach that same frame. Read-only: it never clicks. '
       + 'Anything the local OCR could not read is listed as missing instead of being reported as zero. '
-      + 'OCR needs worlds.arknights.resourceDir; without it the frame is still returned for you to look at.',
+      + 'OCR models ship with the extension, so no configuration is needed; worlds.arknights.resourceDir '
+      + 'only overrides them. When OCR is unavailable the frame is still returned for you to look at.',
     tags: ['read'],
     parameters: {
       type: 'object',
@@ -194,7 +195,7 @@ export class ArknightsWorld implements World {
       origin: 'internal',
       senderKey: this.id,
       text: '明日方舟 World 已挂载。ark_connect / ark_screencap / ark_set_paused / ark_battle_state / ark_deploy 可用；'
-        + '尚未连接游戏窗口。OCR 需要配置 resourceDir，点击与拖拽都只保证「手势已发出」。',
+        + '尚未连接游戏窗口。OCR 模型随包提供（resourceDir 仅用于覆盖），点击与拖拽都只保证「手势已发出」。',
     });
   }
 

@@ -1,12 +1,13 @@
 /**
- * OCR：借本机 MAA 资源包里的 OCR 模型，对扩展自己抓的帧做识别。
+ * OCR：用随包发布的内置 PP-OCRv6 small 模型，对扩展自己抓的帧做识别。
  *
  * 边界很窄：只加载 OCR 模型、只调用 `post_recognition`，不加载 pipeline、不调用 `post_task`，
  * 也不接管截图与点击——控制权始终在 `ArknightsSession` 的控制器那边。
- * 没有资源目录、绑定没导出 Resource/Tasker、模型加载失败，都折成可读原因交给回执，不抛错。
+ * 模型缺失、绑定没导出 Resource/Tasker、加载失败，都折成可读原因交给回执，不抛错。
  */
-import { readdirSync } from 'node:fs';
+import { statSync } from 'node:fs';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import type { MaaControllerLike, MaaModule, MaaResourceLike, MaaTaskJobLike, MaaTaskerLike } from './native.ts';
 import { pngSize } from './screen.ts';
 import { errorText, withTimeout } from './timeout.ts';
@@ -32,45 +33,46 @@ export type OcrOutcome =
 
 export type OcrLoadResult = { readonly ok: true } | { readonly ok: false; readonly error: string };
 
-/**
- * 资源包里 OCR 模型可能的层级，按优先级排列。
- *
- * - MAA 5/6（实测 MAA-v6）：`<根>/PaddleOCR/{det,rec}/inference.onnx` + `rec/keys.txt`；
- * - 另有 `<根>/PaddleCharOCR`，只含英文/数字，读 UI 数字也够用；
- * - 旧版布局是 `<根>/model/ocr`（det.onnx / rec.onnx / keys.txt 平铺）；
- * - 也有人直接把模型目录本身（含 det/、rec/）填进配置。
- */
-export function ocrModelCandidates(resourceDir: string): string[] {
-  const root = resourceDir.trim().replace(/[\\/]+$/, '');
-  if (!root) return [];
-  return [
-    join(root, 'PaddleOCR'),
-    join(root, 'PaddleCharOCR'),
-    join(root, 'model', 'ocr'),
-    join(root, 'model'),
-    root,
-  ];
+/** MaaFramework 只认这三个固定文件名，且必须与模型同目录（rec + keys 必需，det 仅 only_rec 时可缺）。 */
+export const OCR_MODEL_FILENAMES = ['det.onnx', 'rec.onnx', 'keys.txt'] as const;
+
+/** 随包发布的内置模型目录：`src/mfw/ocr.ts` 上溯两级就是包根，发布前后层级一致。 */
+export function builtinOcrModelDir(): string {
+  return fileURLToPath(new URL('../../assets/resource/model/ocr', import.meta.url));
 }
 
 /**
- * 目录（或它的 det/rec 子目录）里有没有 `.onnx`。
- * 返回 `null` 表示目录读不到（例如测试里的假路径）：不拦，交给绑定自己判断。
+ * 目录里缺哪些模型文件；空数组表示三件套齐全且都不是空文件。
+ *
+ * 必须自己验：MaaFramework 的 `lazy_load` 只按文件名递归判断、不看大小，空文件或半包会被
+ * 当成「加载成功」，直到识别时才表现为 0 行——那种失败没人看得懂。
  */
-function hasModelFiles(path: string): boolean | null {
-  const hasOnnx = (dir: string): boolean => {
+export function missingModelFiles(dir: string): string[] {
+  const missing: string[] = [];
+  for (const name of OCR_MODEL_FILENAMES) {
     try {
-      return readdirSync(dir).some((name) => name.endsWith('.onnx'));
+      const stat = statSync(join(dir, name));
+      if (!stat.isFile() || stat.size <= 0) missing.push(name);
     } catch {
-      return false;
+      missing.push(name);
     }
-  };
-  try {
-    readdirSync(path);
-  } catch {
-    return null;
   }
-  if (hasOnnx(path)) return true;
-  return hasOnnx(join(path, 'det')) || hasOnnx(join(path, 'rec'));
+  return missing;
+}
+
+/**
+ * 候选目录，按优先级排列：
+ *
+ * 1. `<resourceDir>/model/ocr`：配置填资源包根（MaaFramework 标准 bundle）时命中；
+ * 2. `<resourceDir>`：直接把模型目录填进配置时命中；
+ * 3. 内置目录：什么都不配也能识别。
+ *
+ * 每个候选都要过 `missingModelFiles`，缺件的跳过并写进失败原因。
+ */
+export function ocrModelCandidates(resourceDir: string, builtinDir = builtinOcrModelDir()): string[] {
+  const root = resourceDir.trim().replace(/[\\/]+$/, '');
+  const candidates = root ? [join(root, 'model', 'ocr'), root, builtinDir] : [builtinDir];
+  return [...new Set(candidates.filter((path) => path.trim() !== ''))];
 }
 
 function isRect(value: unknown): value is readonly [number, number, number, number] {
@@ -128,6 +130,8 @@ export class ArknightsOcr {
     private readonly maa: MaaModule,
     private readonly controller: MaaControllerLike,
     private readonly info: (line: string) => void = () => {},
+    /** 内置模型目录，测试可注入临时目录；生产走包内 assets。 */
+    private readonly builtinDir: string = builtinOcrModelDir(),
   ) {}
 
   /** `null` 表示还没试过；用于回执里区分「没开」和「加载失败」。 */
@@ -156,19 +160,16 @@ export class ArknightsOcr {
       return;
     }
 
-    const candidates = ocrModelCandidates(resourceDir);
-    if (candidates.length === 0) {
-      this.failure = '配置 worlds.arknights.resourceDir 为空，无法加载 OCR 模型。';
-      return;
-    }
+    const candidates = ocrModelCandidates(resourceDir, this.builtinDir);
 
     let lastError: string | null = null;
-    const empty: string[] = [];
+    const incomplete: string[] = [];
     for (const path of candidates) {
-      // 目录存在却没有模型文件时直接跳过：`post_ocr_model` 对空目录也回 success，
-      // 只在识别时才报 det/rec 为空，那时回执已经假装加载成功了。
-      if (hasModelFiles(path) === false) {
-        empty.push(path);
+      // 先自己验三件套：`lazy_load` 只按文件名递归判断、不看大小，空文件或半包会被当成
+      // 「加载成功」，直到识别时才 0 行。缺件直接跳过，并把缺哪个文件写进失败原因。
+      const missing = missingModelFiles(path);
+      if (missing.length > 0) {
+        incomplete.push(`${path}（缺 ${missing.join('、')}）`);
         continue;
       }
       let resource: MaaResourceLike | null = null;
@@ -188,6 +189,7 @@ export class ArknightsOcr {
           this.info(`OCR 模型加载自 ${path}`);
           return;
         }
+        lastError ??= `加载返回失败（状态码 ${String(job.status)}）`;
       } catch (error) {
         lastError = errorText(error);
       }
@@ -198,11 +200,11 @@ export class ArknightsOcr {
       }
     }
 
-    // 试过的路径、哪些目录里压根没有模型、最后一次报错：排障缺一不可。
+    // 试过的路径、各自缺哪个文件、最后一次报错：排障缺一不可。
     const reason = lastError ? `（最后一次失败：${lastError}）` : '';
-    const noFiles = empty.length > 0 ? `；其中 ${empty.join('、')} 里没有 .onnx 模型文件` : '';
+    const noFiles = incomplete.length > 0 ? `；${incomplete.join('；')}` : '';
     this.failure = `没找到可用的 OCR 模型：试过 ${candidates.join('、')}${noFiles}${reason}。`
-      + 'MAA 5/6 应指向资源包根目录（内含 PaddleOCR/det 与 PaddleOCR/rec），旧版是 model/ocr。';
+      + '模型目录里必须平铺 det.onnx、rec.onnx、keys.txt 三个文件。';
   }
 
   async recognize(png: Uint8Array, frameSize?: readonly [number, number]): Promise<OcrOutcome> {
