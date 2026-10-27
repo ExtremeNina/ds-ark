@@ -10,7 +10,6 @@ import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { ARKNIGHTS_DEFAULTS } from '../src/config.ts';
 import { toPoint } from '../src/mfw/geometry.ts';
-import { screenshotName } from '../src/mfw/screen.ts';
 import { ArknightsSession } from '../src/mfw/session.ts';
 
 const click = process.argv.includes('--click');
@@ -30,7 +29,7 @@ if (!connected.ok) {
     console.error(`截图失败：${shot.error}`);
     process.exitCode = 1;
   } else {
-    const file = join(process.cwd(), screenshotName(new Date()));
+    const file = join(process.cwd(), `smoke-${Date.now()}.png`);
     writeFileSync(file, shot.png);
     console.log(`截图已保存：${file}（${shot.png.byteLength} 字节）`);
     console.log('打开这张图确认画面不是全黑、也不是别的窗口。');

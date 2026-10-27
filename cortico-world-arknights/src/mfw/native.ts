@@ -25,7 +25,6 @@ export interface MaaImageJobLike {
 export interface MaaControllerLike {
   readonly connected: boolean;
   readonly resolution: [number, number] | null;
-  readonly uuid: string | null;
   post_connection(): MaaJobLike;
   post_click(x: number, y: number, contact?: number, pressure?: number): MaaJobLike;
   post_screencap(): MaaImageJobLike;
@@ -42,7 +41,6 @@ export interface MaaModule {
   readonly Win32Controller: MaaWin32ControllerCtor;
   readonly Win32ScreencapMethod?: Record<string, string>;
   readonly Win32InputMethod?: Record<string, string>;
-  readonly Global?: { readonly version?: string };
 }
 
 export type MaaLoadResult = { ok: true; maa: MaaModule } | { ok: false; error: string };
@@ -75,10 +73,4 @@ export async function loadMaa(): Promise<MaaLoadResult> {
     );
   }
   return loading;
-}
-
-/** 仅供测试：清掉缓存，让下一次 `loadMaa()` 重新走动态导入。 */
-export function resetMaaLoader(): void {
-  settled = null;
-  loading = null;
 }

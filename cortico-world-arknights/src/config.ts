@@ -1,4 +1,5 @@
 import type { ConfigGroup } from 'cortico/core/types.ts';
+import { DEFAULT_WINDOW_KEYWORDS } from './mfw/window.ts';
 
 /**
  * 截图方式：取值就是绑定里 `Win32ScreencapMethod` 的键名，`Default` 表示用本扩展选定的兜底组合。
@@ -49,7 +50,7 @@ export interface ArknightsConfigSection {
 
 export const ARKNIGHTS_DEFAULTS: ArknightsConfigSection = {
   enabled: false,
-  windowMatch: '明日方舟,Arknights',
+  windowMatch: DEFAULT_WINDOW_KEYWORDS.join(','),
   screencapMethod: 'Default',
   inputMethod: 'SendMessage',
   pauseButton: { x: 0.97, y: 0.06 },

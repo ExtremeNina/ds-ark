@@ -25,10 +25,15 @@ class FakeController implements MaaControllerLike {
   static devices: readonly MaaDesktopDevice[] = [];
   static clicks: Array<[number, number]> = [];
   static created: FakeController[] = [];
+  /** 模拟「连上了但读不到尺寸」与「抓到的画面是空的」两种坏情况。 */
+  static noResolution = false;
+  static emptyImage = false;
 
   connected = false;
-  readonly resolution: [number, number] | null = [1000, 400];
-  readonly uuid = 'fake-uuid';
+
+  get resolution(): [number, number] | null {
+    return FakeController.noResolution ? null : [1000, 400];
+  }
 
   constructor(
     readonly handle: string,
@@ -55,7 +60,7 @@ class FakeController implements MaaControllerLike {
 
   post_screencap(): MaaImageJobLike {
     let self: MaaImageJobLike;
-    self = { wait: async () => self, get: () => PNG_BYTES };
+    self = { wait: async () => self, get: () => (FakeController.emptyImage ? null : PNG_BYTES) };
     return self;
   }
 
@@ -80,6 +85,8 @@ beforeEach(() => {
   ];
   FakeController.clicks = [];
   FakeController.created = [];
+  FakeController.noResolution = false;
+  FakeController.emptyImage = false;
 });
 
 afterEach(() => rmSync(scratchDir, { recursive: true, force: true }));
@@ -126,15 +133,19 @@ describe('明日方舟 World', () => {
     await world.stop();
   });
 
-  it('tools() 与 describe.json 的工具、事件、环境提示词保持一致', () => {
+  it('tools() 与 describe.json 的工具、事件、环境提示词逐字段一致', () => {
     const described = JSON.parse(readFileSync(join(PACKAGE_DIR, 'describe.json'), 'utf8')) as {
-      tools: Array<{ name: string }>;
-      events: Array<{ type: string }>;
+      tools: unknown;
+      events: unknown;
       prompts: Array<{ key: string; content: string }>;
     };
     const { world } = newWorld();
-    expect(world.tools().map((t) => t.name).sort()).toEqual(described.tools.map((t) => t.name).sort());
-    expect(ARKNIGHTS.describe?.events.map((e) => e.type)).toEqual(described.events.map((e) => e.type));
+    // describe.json 是 pnpm describe:extension 的产物，这里用同一份声明比到字段级，防止手写漂移。
+    expect(JSON.parse(JSON.stringify(ARKNIGHTS.describe?.tools))).toEqual(described.tools);
+    expect(world.tools().map((t) => t.name).sort()).toEqual(
+      (described.tools as Array<{ name: string }>).map((t) => t.name).sort(),
+    );
+    expect(JSON.parse(JSON.stringify(ARKNIGHTS.describe?.events))).toEqual(described.events);
 
     const docs = world.webUi('zh').promptDocs ?? [];
     expect(docs.map((d) => d.key)).toEqual(described.prompts.map((p) => p.key));
@@ -163,8 +174,13 @@ describe('明日方舟 World', () => {
     expect(outcome.text).toContain('无标题 - 记事本');
   });
 
-  it('未连接时截图与暂停都返回失败回执，而不是抛错', async () => {
+  it('未连接时三个工具都返回失败回执，而不是抛错', async () => {
+    FakeController.devices = [];
     const { world } = newWorld();
+    const connect = receipt(await toolOf(world, 'ark_connect').handler({}, call));
+    expect(connect.failed).toBe(true);
+    expect(connect.text).toContain('没有找到窗口');
+
     const cases: Array<[string, Record<string, unknown>]> = [
       ['ark_screencap', {}],
       ['ark_set_paused', { paused: true }],
@@ -172,7 +188,7 @@ describe('明日方舟 World', () => {
     for (const [name, args] of cases) {
       const outcome = receipt(await toolOf(world, name).handler(args, call));
       expect(outcome.failed, name).toBe(true);
-      expect(outcome.text).toContain('ark_connect');
+      expect(outcome.text, name).toContain('ark_connect');
     }
   });
 
@@ -241,6 +257,32 @@ describe('明日方舟 World', () => {
     expect(resolveMethod(table, 'PrintWindow', 'Background')).toBe('8');
     expect(resolveMethod(table, 'Default', 'Background')).toBe('18');
     expect(resolveMethod(table, '不存在的名字', 'Background')).toBe('18');
-    expect(resolveMethod(undefined, 'PrintWindow', 'Background')).toBe('0');
+  });
+
+  it('绑定缺方法表时拒绝连接，而不是拿假标志位凑一个「成功」', async () => {
+    const bareMaa: MaaModule = { Win32Controller: FakeController as unknown as MaaModule['Win32Controller'] };
+    const { world } = newWorld(bareMaa);
+    const outcome = receipt(await toolOf(world, 'ark_connect').handler({}, call));
+    expect(outcome.failed).toBe(true);
+    expect(outcome.text).toContain('截图方式');
+    expect(FakeController.created).toEqual([]);
+    expect(resolveMethod(undefined, 'PrintWindow', 'Background')).toBeNull();
+  });
+
+  it('连上了却拿不到画面尺寸时断开，且不把半连接状态留给下一次调用', async () => {
+    FakeController.noResolution = true;
+    FakeController.emptyImage = true;
+    const { world, session } = newWorld();
+    const outcome = receipt(await toolOf(world, 'ark_connect').handler({}, call));
+    expect(outcome.failed).toBe(true);
+    expect(outcome.text).toContain('拿不到画面尺寸');
+    expect(session.connected).toBe(false);
+    expect(session.resolution).toBeNull();
+
+    FakeController.noResolution = false;
+    FakeController.emptyImage = false;
+    const again = receipt(await toolOf(world, 'ark_connect').handler({}, call));
+    expect(again.failed).toBeUndefined();
+    expect(again.text).toContain('1000×400');
   });
 });

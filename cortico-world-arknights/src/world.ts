@@ -9,7 +9,7 @@ import { nowIso } from 'cortico/core/util.ts';
 import { ARKNIGHTS_CONFIG_GROUP, type ArknightsConfigSection } from './config.ts';
 import { toPoint } from './mfw/geometry.ts';
 import { SCREENSHOT_MIME, screenshotName } from './mfw/screen.ts';
-import { ArknightsSession, connectionLine } from './mfw/session.ts';
+import { ArknightsSession } from './mfw/session.ts';
 
 const ENV_PROMPT_FILE = fileURLToPath(new URL('./ENV_PROMPT.md', import.meta.url));
 
@@ -137,7 +137,7 @@ export class ArknightsWorld implements World {
 
   private async connect(): Promise<ToolOutcome | string> {
     const result = await this.session.connect(this.opts.cfg);
-    if (!result.ok) return fail(`连接失败：${result.error}`);
+    if (!result.ok) return fail(result.error);
     this.host?.log.info('connected to arknights window');
     const [width, height] = result.resolution;
     return `已连接「${result.window.windowName}」（窗口类名 ${result.window.className}），截图分辨率 ${width}×${height}。`
@@ -146,17 +146,18 @@ export class ArknightsWorld implements World {
 
   private async screencap(): Promise<ToolOutcome> {
     const result = await this.session.screencap();
-    if (!result.ok) return fail(`截图失败：${result.error}`);
+    if (!result.ok) return fail(result.error);
     const at = new Date();
-    const size = `${result.width}×${result.height}`;
+    const size = this.session.resolution;
+    const label = size ? `${size[0]}×${size[1]}` : '尺寸未知';
     return {
-      text: `已抓取一帧，${size}，PNG ${result.png.byteLength} 字节。这是本次调用时刻的画面，不保证与之后的状态一致。`,
+      text: `已抓取一帧，${label}，PNG ${result.png.byteLength} 字节。这是本次调用时刻的画面，不保证与之后的状态一致。`,
       blobs: [
         {
           bytes: result.png,
           mime: SCREENSHOT_MIME,
           name: screenshotName(at),
-          fallbackText: `明日方舟当前帧，${size}，PNG ${result.png.byteLength} 字节（端点不接受图片时只发送这句）。`,
+          fallbackText: `明日方舟当前帧，${label}，PNG ${result.png.byteLength} 字节（端点不接受图片时只发送这句）。`,
         },
       ],
     };
@@ -168,13 +169,18 @@ export class ArknightsWorld implements World {
       return fail('参数 paused 必须是布尔值：true 表示暂停，false 表示继续。');
     }
     if (!this.session.connected) {
-      return fail(`还没连接游戏窗口（${connectionLine(this.session)}），先调用 ark_connect。`);
+      return fail('暂停失败：还没连接游戏窗口，先调用 ark_connect。');
+    }
+    const size = this.session.resolution;
+    if (!size) {
+      // 没有画面尺寸就无法把比例换成像素；拿 1280×720 之类的猜测值去点会点偏。
+      return fail('暂停失败：还没拿到画面尺寸，先调用 ark_screencap 取一帧再试。');
     }
     const cfg = this.opts.cfg;
-    const [width, height] = this.session.resolution;
+    const [width, height] = size;
     const { x, y } = toPoint(cfg.pauseButton, [width, height]);
     const clicked = await this.session.click(x, y);
-    if (!clicked.ok) return fail(`点击失败：${clicked.error}`);
+    if (!clicked.ok) return fail(clicked.error);
     const action = paused ? '暂停' : '继续';
     return `已向 (${x}, ${y}) 发送一次点击（按 ${width}×${height} 的 ${(cfg.pauseButton.x * 100).toFixed(1)}% / `
       + `${(cfg.pauseButton.y * 100).toFixed(1)}% 换算），意图是${action}。`

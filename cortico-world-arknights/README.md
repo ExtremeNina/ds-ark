@@ -67,7 +67,7 @@ pnpm smoke --click   # 额外对暂停坐标点一次
 ```bash
 corepack pnpm install   # 装依赖（含 @maaxyz/maa-node 预编译原生包，下载较慢）
 pnpm typecheck          # tsc --noEmit
-pnpm test               # vitest run（25 个用例，不需要游戏，也不加载原生模块）
+pnpm test               # vitest run（27 个用例，不需要游戏，也不加载原生模块）
 ```
 
 测试用假的 maa 模块替掉原生绑定，覆盖坐标换算、窗口匹配、未连接降级、回执形状，以及 `tools()` / `describe.json` / `ENV_PROMPT.md` 三者的一致性。
