@@ -8,12 +8,20 @@
 import { statSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { cropRgba, decodePng, encodePng, toGrayscale } from './png.ts';
 import type { MaaControllerLike, MaaModule, MaaResourceLike, MaaTaskJobLike, MaaTaskerLike } from './native.ts';
 import { pngSize } from './screen.ts';
 import { errorText, withTimeout } from './timeout.ts';
 
 const MODEL_LOAD_TIMEOUT_MS = 30_000;
 const RECO_TIMEOUT_MS = 15_000;
+/**
+ * 手牌条的起始高度（占整帧比例）：底部 22% 覆盖卡费那一排。
+ *
+ * 二次识别会先裁这一条再转灰度——实测彩色下最后一张卡的「24」压在浅色立绘上，
+ * det 认不出来；转灰度后同一批像素就能出框。整帧那一次仍然保留，两路结果按 x 归并。
+ */
+const HAND_STRIP_TOP = 0.78;
 
 /** 一条识别结果：文字 + 归一化外框（0~1，相对整帧左上角）。 */
 export interface OcrLine {
@@ -217,22 +225,80 @@ export class ArknightsOcr {
     })();
     if (!size) return { ok: false, error: '识别失败：读不出这一帧的像素尺寸。' };
 
-    let job: MaaTaskJobLike;
+    let detail: unknown;
+    let lines: OcrLine[];
     try {
-      // 绑定的 ImageData 是 ArrayBuffer；`slice()` 保证拿到的是一段连续的、属于本帧的缓冲。
-      const image = png.slice().buffer as ArrayBuffer;
-      job = tasker.post_recognition('OCR', { roi: [0, 0, size[0], size[1]], only_rec: false }, image);
-      const done = await withTimeout(Promise.resolve(job.wait()), RECO_TIMEOUT_MS, 'OCR 识别');
-      if (!done.succeeded) return { ok: false, error: `识别失败：控制器返回失败（状态码 ${String(done.status)}）。` };
+      const full = await this.runOcr(tasker, png, [0, 0, size[0], size[1]], size);
+      detail = full.detail;
+      lines = full.lines;
     } catch (error) {
       return { ok: false, error: `识别失败：${errorText(error)}` };
     }
 
-    const detail = this.pickDetail(tasker, job);
-    const lines = toOcrLines(detail, size);
+    // 手牌条再来一次（灰度）：整帧那次认不出的卡费，去色后往往能出框。
+    const strip = await this.runHandStrip(tasker, png, size);
+    if (strip.length > 0) lines = [...lines, ...strip];
+
     return lines.length > 0
       ? { ok: true, lines, rawDetail: detail }
       : { ok: true, lines, rawDetail: detail, debug: '识别完成，但结果里没有带文字的条目' };
+  }
+
+  /** 跑一次 OCR；失败抛错，由调用方折成可读原因。 */
+  private async runOcr(
+    tasker: MaaTaskerLike,
+    imageBytes: Uint8Array,
+    roi: readonly [number, number, number, number],
+    size: readonly [number, number],
+  ): Promise<{ detail: unknown; lines: OcrLine[] }> {
+    // 绑定的 ImageData 是 ArrayBuffer；`slice()` 保证拿到的是一段连续的、属于本帧的缓冲。
+    const image = imageBytes.slice().buffer as ArrayBuffer;
+    const job = tasker.post_recognition('OCR', { roi: [...roi], only_rec: false }, image);
+    const done = await withTimeout(Promise.resolve(job.wait()), RECO_TIMEOUT_MS, 'OCR 识别');
+    if (!done.succeeded) throw new Error(`控制器返回失败（状态码 ${String(done.status)}）。`);
+    const detail = this.pickDetail(tasker, job);
+    return { detail, lines: toOcrLines(detail, size) };
+  }
+
+  /**
+   * 手牌条二次识别：裁底部一条 → 转灰度 → 重新编码 → OCR，最后把框平移回整帧坐标。
+   *
+   * 这是增强项：解码不支持、编码失败、绑定报错都只意味着少了这一路结果，不会让整次识别失败。
+   */
+  private async runHandStrip(
+    tasker: MaaTaskerLike,
+    png: Uint8Array,
+    size: readonly [number, number],
+  ): Promise<OcrLine[]> {
+    const [width, height] = size;
+    const top = Math.round(height * HAND_STRIP_TOP);
+    const stripHeight = height - top;
+    if (stripHeight <= 0) return [];
+
+    try {
+      const decoded = decodePng(png);
+      if (!decoded) return [];
+      const cropped = cropRgba(decoded, { x: 0, y: top, w: width, h: stripHeight });
+      if (!cropped) return [];
+      const encoded = encodePng(toGrayscale(cropped));
+      if (!encoded) return [];
+
+      const { lines } = await this.runOcr(tasker, encoded, [0, 0, width, stripHeight], [width, stripHeight]);
+      // 条带的框是按条高归一化的，映射回整帧时要先乘回条高、再加上偏移，最后按整帧高归一化。
+      const scaleY = stripHeight / height;
+      const offsetY = top / height;
+      return lines.map((line) => ({
+        text: line.text,
+        box: {
+          x: line.box.x,
+          y: offsetY + line.box.y * scaleY,
+          w: line.box.w,
+          h: line.box.h * scaleY,
+        },
+      }));
+    } catch {
+      return [];
+    }
   }
 
   /** 先按 `TaskDetail.nodes → node_detail().reco` 取；取不到再退回 `recognition_detail()`。 */

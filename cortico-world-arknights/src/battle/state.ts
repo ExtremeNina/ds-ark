@@ -100,6 +100,25 @@ function keepHandRow(cards: readonly HandCandidate[]): HandCandidate[] {
   return cards.filter((card) => Math.abs(card.y - median) <= HAND_ROW_TOLERANCE);
 }
 
+/** 同一张卡被整帧与手牌条各读到一次时，两个框的 x 中心只差几个像素。 */
+const HAND_DUPLICATE_X = 0.015;
+
+/**
+ * 归并两路结果：按 x 排序后丢掉挨得太近的重复项。
+ *
+ * 排序是稳定的，所以同一位置先出现的那条（整帧那一路）胜出；手牌条只补整帧没读到的位置。
+ */
+function dedupeByX(cards: readonly HandCandidate[]): HandCandidate[] {
+  const sorted = [...cards].sort((a, b) => a.x - b.x);
+  const unique: HandCandidate[] = [];
+  for (const card of sorted) {
+    const last = unique.at(-1);
+    if (last && card.x - last.x < HAND_DUPLICATE_X) continue;
+    unique.push(card);
+  }
+  return unique;
+}
+
 /** 把识别行折成战场状态；同一位置出现多次时取第一个认到的值。 */
 export function parseBattleState(lines: readonly OcrLine[]): BattleState {
   let cost: number | null = null;
@@ -145,8 +164,7 @@ export function parseBattleState(lines: readonly OcrLine[]): BattleState {
     }
   }
 
-  const handCosts = keepHandRow(handCandidates)
-    .sort((a, b) => a.x - b.x)
+  const handCosts = dedupeByX(keepHandRow(handCandidates))
     .map(({ cost: value, x }) => ({ cost: value, x }));
   return { cost, life, enemies, paused, handCosts };
 }

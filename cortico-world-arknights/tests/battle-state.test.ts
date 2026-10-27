@@ -194,6 +194,27 @@ describe('战场状态解析', () => {
     expect(state.handCosts.map((c) => c.cost)).toEqual([12, 16, 16, 17, 18, 19, 24]);
   });
 
+  it('整帧与灰度条读到同一张卡时按 x 去重，只保留先出现的那条', () => {
+    const state = parseBattleState([
+      // 整帧那一路
+      line('16', 0.26, 0.84, 0.04, 0.03),
+      line('12', 0.10, 0.84, 0.04, 0.03),
+      // 灰度条那一路：前两张与整帧重叠，最后一张只有它读到
+      line('16', 0.262, 0.84, 0.04, 0.03),
+      line('12', 0.101, 0.84, 0.04, 0.03),
+      line('24', 0.86, 0.84, 0.04, 0.03),
+    ]);
+    expect(state.handCosts.map((c) => c.cost)).toEqual([12, 16, 24]);
+  });
+
+  it('同一位置两路读数冲突时保留整帧那条', () => {
+    const state = parseBattleState([
+      line('16', 0.26, 0.84, 0.04, 0.03),
+      line('18', 0.262, 0.84, 0.04, 0.03),
+    ]);
+    expect(state.handCosts.map((c) => c.cost)).toEqual([16]);
+  });
+
   it('手牌按排聚类：即便区间放进来了，偏离卡费行的数字也会被剔除', () => {
     const state = parseBattleState([
       line('12', 0.10, 0.83, 0.04, 0.03),
