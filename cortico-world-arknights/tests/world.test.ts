@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -545,9 +545,23 @@ describe('明日方舟 World', () => {
     const outcome = receipt(await toolOf(world, 'ark_battle_state').handler({}, call));
     expect(outcome.failed).toBeUndefined();
     expect(outcome.text).toContain('识别不可用');
-    expect(outcome.text).toContain('model');
+    expect(outcome.text).toContain('PaddleOCR');
     expect(outcome.blobs).toHaveLength(1);
-    expect(FakeResource.paths).toHaveLength(3);
+    expect(FakeResource.paths).toHaveLength(5);
+  });
+
+  it('读战场：资源包里 PaddleOCR 优先，且不会先把根目录当成模型', async () => {
+    // MAA 5/6 的真实布局：<根>/PaddleOCR/rec/inference.onnx
+    mkdirSync(join(scratchDir, 'PaddleOCR', 'rec'), { recursive: true });
+    writeFileSync(join(scratchDir, 'PaddleOCR', 'rec', 'inference.onnx'), '');
+
+    const { ctx, world } = newWorld();
+    Object.assign(ctx.cfg, { resourceDir: scratchDir });
+    await toolOf(world, 'ark_connect').handler({}, call);
+
+    const outcome = receipt(await toolOf(world, 'ark_battle_state').handler({}, call));
+    expect(outcome.failed).toBeUndefined();
+    expect(FakeResource.paths).toEqual([join(scratchDir, 'PaddleOCR')]);
   });
 
   it('读战场：模型加载直接抛错时，回执里既有试过的路径也有最后的原因', async () => {

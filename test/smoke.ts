@@ -176,6 +176,10 @@ async function main(): Promise<void> {
         );
       }
       if (ocr.debug) console.log(`  （${ocr.debug}）`);
+      if (ocr.lines.length === 0) {
+        console.log('  （0 行通常是模型没真正加载：看上面有没有「Failed to load det or rec」；');
+        console.log('    把 --resource 指到含 PaddleOCR 的资源根目录，或直接指到 PaddleOCR 目录。）');
+      }
 
       const state = parseBattleState(ocr.lines);
       console.log(`[state] ${describeBattleState(state)}`);

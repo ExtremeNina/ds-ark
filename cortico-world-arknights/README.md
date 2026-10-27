@@ -72,7 +72,17 @@ Coopanion（Cortico 框架）的 World 扩展：把国服《明日方舟》PC �
 
 `ark_battle_state` 会把费用、生命值、剩余敌人、暂停横幅和手牌费用读出来。识别用的是 **MaaFramework 自带的 OCR**，模型来自你本机的 MAA 资源包——扩展不打包模型、不下载模型、不联网：
 
-1. 把 `resourceDir` 指到资源包根目录（例如 MaaAssistantArknights 的 `resource`），里面应有 `model/ocr/`。
+1. 把 `resourceDir` 指到资源包根目录（例如 `D:\soft\MAA-v6\resource`）。扩展会按下面的顺序找模型，命中即用：
+
+   | 顺序 | 路径 | 适用版本 |
+   |---|---|---|
+   | 1 | `<resourceDir>/PaddleOCR` | **MAA 5/6（实测）**，内含 `det/inference.onnx`、`rec/inference.onnx` 与 `rec/keys.txt` |
+   | 2 | `<resourceDir>/PaddleCharOCR` | 只含英文/数字的模型，读 UI 数字也够用 |
+   | 3 | `<resourceDir>/model/ocr` | 旧版布局（`det.onnx` 平铺） |
+   | 4 | `<resourceDir>/model` | 更旧的整理方式 |
+   | 5 | `<resourceDir>` | 直接把模型目录本身填进配置 |
+
+   目录存在但没有 `.onnx` 文件时会被跳过——`post_ocr_model` 对空目录也回 success，不拦住的话会假装加载成功、直到识别时才报 `det=0 rec=0`。
 2. 重启 Coopanion。第一次调用 `ark_battle_state` 时会加载模型（约 1~2 秒），之后复用；每次识别在 CPU 上约 0.1~0.3 秒，加上抓帧整体不到半秒。
 3. 留空或路径不对时，`ark_battle_state` **不报失败**：仍然返回那一帧，并在回执里说明「这次读不出战场数字」，模型改看图。
 
@@ -88,6 +98,8 @@ Coopanion（Cortico 框架）的 World 扩展：把国服《明日方舟》PC �
 ### 校准识别区间
 
 进了战斗后跑 `pnpm smoke --state`：它会打印每一行识别结果的文字、归一化坐标、像素坐标与命中的区域名。某项一直「没读到」，就按打印出来的像素坐标去调 `src/battle/regions.ts` 里对应的区间（比如费用其实在 `y = 0.86`，就把 `cost.y` 的下界压到 `0.86` 以下），然后 `pnpm smoke --state` 再验一次。
+
+如果 `[ocr]` 是 **0 行**，先别动 ROI：看 MaaFramework 自己的日志（`ERR ... Failed to load det or rec ... [det=0000000000000000]`）说明模型根本没注册上——路径不对或模型版本与绑定不匹配，与区间无关。此时确认 `[info] OCR 模型加载自 …` 指向的是 `…\PaddleOCR`（或 `…\PaddleCharOCR`），而不是资源包根目录。
 
 ## 部署干员：点选式
 
@@ -136,7 +148,7 @@ pnpm smoke --screencap DXGI_DesktopDup       # 换截图方式
 ```bash
 corepack pnpm install   # 装依赖（含 @maaxyz/maa-node 预编译原生包，下载较慢）
 pnpm typecheck          # tsc --noEmit
-pnpm test               # vitest run（75 个用例，不需要游戏，也不加载原生模块）
+pnpm test               # vitest run（76 个用例，不需要游戏，也不加载原生模块）
 ```
 
 测试用假的 maa 模块替掉原生绑定，覆盖坐标换算、窗口匹配、未连接降级、回执形状、区域归类与数字清洗、部署几何、OCR 的加载失败与「没有模型」降级，以及 `tools()` / `describe.json` / `ENV_PROMPT.md` 三者的一致性。
@@ -157,13 +169,13 @@ pnpm check:extension <本包目录>
 | `inputMethod` | `AnchoredTouch` | 取值见 `Win32InputMethod`；实测能命中右上角小按钮且不抢前台，`SendMessage` 系在本客户端点不中 |
 | `pauseButton` | `0.966 / 0.071` | 暂停按钮中心的比例坐标，只在 16:9 下保证 |
 | `verifyAfterClick` | `true` | 暂停/恢复点击后补拍一帧作为附件；关掉可省一次抓帧与一张图的 token |
-| `resourceDir` | 空 | MAA 资源包根目录（内含 `model/ocr`）。只读其中的 OCR 模型；留空则不识别，`ark_battle_state` 只给图 |
+| `resourceDir` | 空 | MAA 资源包根目录（MAA 5/6 会自动找其中的 `PaddleOCR`，旧版找 `model/ocr`），也可直接填模型目录。只读 OCR 模型；留空则不识别，`ark_battle_state` 只给图 |
 
 ## 接进 Coopanion：完整流程与验收
 
 真机冒烟全绿之后再接线（冒烟只验证底层，不经过 Coopanion）：
 
-1. 本目录 `corepack pnpm install && pnpm test`，确认 75 个用例通过。
+1. 本目录 `corepack pnpm install && pnpm test`，确认 76 个用例通过。
 2. 扩展页 → 从本机目录安装（`link`）→ **重启 Coopanion 进程**。
 3. World 总览启用「明日方舟」；在配置里填 `resourceDir`（MAA 资源包根目录），保存。
 4. 进一场 1-7（或任意已解锁的关卡），让战斗跑起来，然后逐条验收：
