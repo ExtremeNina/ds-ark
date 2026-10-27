@@ -232,7 +232,9 @@ export class ArknightsSession {
     if (reported[0] === size.width && reported[1] === size.height) return;
     this.warnedSizeMismatch = true;
     this.warn(
-      `控制器报告的尺寸 ${reported[0]}×${reported[1]} 与实际画面 ${size.width}×${size.height} 不一致，点击换算改用实际画面尺寸。`,
+      `控制器报告的尺寸 ${reported[0]}×${reported[1]} 与实际画面 ${size.width}×${size.height} 不同，点击换算改用实际画面尺寸。`
+        + 'MaaFramework 常把截图短边缩到 720（1920×1080 → 1280×720），这一条本身正常；'
+        + '只有控制器尺寸明显大于窗口、且帧里能看到桌面背景时，才可能是抓到了整屏（换截图方式）。',
     );
   }
 
