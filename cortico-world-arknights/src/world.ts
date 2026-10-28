@@ -707,10 +707,10 @@ export class ArknightsWorld implements World {
       source: this.id,
       origin: 'internal',
       senderKey: this.id,
-      text: '明日方舟 World 已挂载。ark_connect / ark_screencap / ark_set_paused / ark_battle_state / ark_deploy / '
-        + 'ark_enter_stage / ark_open_roguelike / ark_wait / ark_click / ark_swipe / ark_ocr 可用；'
-        + '尚未连接游戏窗口。OCR 模型随包提供（resourceDir 仅用于覆盖），点击与拖拽都只保证「手势已发出」；'
-        + '选关与集成战略入口用内置 pipeline，默认只到编队页/主题页，不替你开打。',
+      text: '明日方舟 World 已挂载。14 个工具可用：连接（ark_connect）、截图（ark_screencap）、'
+        + '选关导航（ark_enter_stage）、干员识别（ark_find_operators）、'
+        + 'Copilot 战斗执行（ark_run_copilot）、作业检索（ark_fetch_copilot）、'
+        + '战场监控（ark_battle_state）等；战斗时必须使用 ark_run_copilot 自动作战，严禁手动逐个拖拽部署。',
     });
   }
 
