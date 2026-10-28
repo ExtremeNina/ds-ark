@@ -312,6 +312,14 @@ describe('明日方舟 World', () => {
     expect(readFileSync(docs[0]!.path, 'utf8')).toBe(described.prompts[0]!.content);
   });
 
+  it('所有已声明工具都已挂载实现（不能掉入未实现的工具 default 分支）', async () => {
+    const { world } = newWorld();
+    for (const tool of world.tools()) {
+      const outcome = receipt(await tool.handler({}, call));
+      expect(outcome.text).not.toContain('未实现的工具');
+    }
+  });
+
   it('配置组声明的每个路径都能在 defaults() 里取到值', () => {
     const defaults = ARKNIGHTS.defaults() as unknown as Record<string, unknown>;
     const paths = Object.keys(ARKNIGHTS_CONFIG_GROUP.schema.properties);

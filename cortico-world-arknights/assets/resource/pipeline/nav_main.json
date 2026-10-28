@@ -8,7 +8,7 @@
   "NavMain@EnterOperation": {
     "recognition": "OCR",
     "expected": ["作战", "终端"],
-    "roi": [260, 480, 760, 240],
+    "roi": [200, 50, 950, 650],
     "action": "Click",
     "next": ["NavMain@EnterTheme", "NavMain@Chapter"],
     "timeout": 5000

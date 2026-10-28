@@ -408,6 +408,10 @@ export class ArknightsWorld implements World {
           return { ...decl, handler: (args) => this.swipeTo(args) };
         case 'ark_find_operators':
           return { ...decl, handler: (args) => this.findOperators(args) };
+        case 'ark_run_copilot':
+          return { ...decl, handler: (args) => this.runCopilot(args) };
+        case 'ark_fetch_copilot':
+          return { ...decl, handler: (args) => this.fetchCopilotTool(args) };
         case 'ark_ocr':
           return { ...decl, handler: (args) => this.readAll(args) };
         default:
