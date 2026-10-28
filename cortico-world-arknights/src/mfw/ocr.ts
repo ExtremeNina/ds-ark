@@ -1,19 +1,19 @@
 /**
  * OCR：用随包发布的内置 PP-OCRv6 small 模型，对扩展自己抓的帧做识别。
  *
- * 边界很窄：只加载 OCR 模型、只调用 `post_recognition`，不加载 pipeline、不调用 `post_task`，
- * 也不接管截图与点击——控制权始终在 `ArknightsSession` 的控制器那边。
- * 模型缺失、绑定没导出 Resource/Tasker、加载失败，都折成可读原因交给回执，不抛错。
+ * 边界很窄：只调用 `post_recognition`，不接管截图与点击——控制权始终在 `ArknightsSession`
+ * 的控制器那边。模型与 Tasker 由 `ArknightsRuntime` 持有（pipeline 共用同一个），
+ * 模型缺失、绑定没导出 Resource/Tasker、加载失败都折成可读原因交给回执，不抛错。
  */
 import { statSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { cropRgba, decodePng, encodePng, toGrayscale } from './png.ts';
-import type { MaaControllerLike, MaaModule, MaaResourceLike, MaaTaskJobLike, MaaTaskerLike } from './native.ts';
+import type { MaaTaskJobLike, MaaTaskerLike } from './native.ts';
+import type { ArknightsRuntime } from './runtime.ts';
 import { pngSize } from './screen.ts';
 import { errorText, withTimeout } from './timeout.ts';
 
-const MODEL_LOAD_TIMEOUT_MS = 30_000;
 const RECO_TIMEOUT_MS = 15_000;
 /**
  * 手牌条的起始高度（占整帧比例）：底部 22% 覆盖卡费那一排。
@@ -127,97 +127,28 @@ export function toOcrLines(detail: unknown, frameSize: readonly [number, number]
   return lines.sort((a, b) => a.box.x - b.box.x);
 }
 
-/** 一次加载、多次识别的 OCR 句柄；失败原因缓存，不在每次调用重试。 */
+/** 一次加载、多次识别的 OCR 句柄；Resource/Tasker 由 `ArknightsRuntime` 持有并复用。 */
 export class ArknightsOcr {
-  private resource: MaaResourceLike | null = null;
-  private tasker: MaaTaskerLike | null = null;
-  private failure: string | null = null;
-  private loading: Promise<void> | null = null;
-
-  constructor(
-    private readonly maa: MaaModule,
-    private readonly controller: MaaControllerLike,
-    private readonly info: (line: string) => void = () => {},
-    /** 内置模型目录，测试可注入临时目录；生产走包内 assets。 */
-    private readonly builtinDir: string = builtinOcrModelDir(),
-  ) {}
+  constructor(private readonly runtime: ArknightsRuntime) {}
 
   /** `null` 表示还没试过；用于回执里区分「没开」和「加载失败」。 */
   get status(): 'idle' | 'ready' | 'failed' {
-    if (this.resource && this.tasker) return 'ready';
-    return this.failure ? 'failed' : 'idle';
+    return this.runtime.ocrStatus;
   }
 
   get ready(): boolean {
-    return this.status === 'ready';
+    return this.runtime.ocrReady;
   }
 
   async load(resourceDir: string): Promise<OcrLoadResult> {
-    if (this.ready) return { ok: true };
-    if (this.failure) return { ok: false, error: this.failure };
-    this.loading ??= this.loadModel(resourceDir);
-    await this.loading;
-    this.loading = null;
-    return this.failure ? { ok: false, error: this.failure } : { ok: true };
-  }
-
-  private async loadModel(resourceDir: string): Promise<void> {
-    const { Resource, Tasker } = this.maa;
-    if (!Resource || !Tasker) {
-      this.failure = '当前 @maaxyz/maa-node 没有导出 Resource / Tasker，这台机器上无法做 OCR。';
-      return;
-    }
-
-    const candidates = ocrModelCandidates(resourceDir, this.builtinDir);
-
-    let lastError: string | null = null;
-    const incomplete: string[] = [];
-    for (const path of candidates) {
-      // 先自己验三件套：`lazy_load` 只按文件名递归判断、不看大小，空文件或半包会被当成
-      // 「加载成功」，直到识别时才 0 行。缺件直接跳过，并把缺哪个文件写进失败原因。
-      const missing = missingModelFiles(path);
-      if (missing.length > 0) {
-        incomplete.push(`${path}（缺 ${missing.join('、')}）`);
-        continue;
-      }
-      let resource: MaaResourceLike | null = null;
-      try {
-        resource = new Resource();
-        const job = await withTimeout(
-          Promise.resolve(resource.post_ocr_model(path).wait()),
-          MODEL_LOAD_TIMEOUT_MS,
-          '加载 OCR 模型',
-        );
-        if (job.succeeded && resource.loaded) {
-          const tasker = new Tasker();
-          tasker.resource = resource;
-          tasker.controller = this.controller;
-          this.resource = resource;
-          this.tasker = tasker;
-          this.info(`OCR 模型加载自 ${path}`);
-          return;
-        }
-        lastError ??= `加载返回失败（状态码 ${String(job.status)}）`;
-      } catch (error) {
-        lastError = errorText(error);
-      }
-      try {
-        resource?.destroy();
-      } catch {
-        // 销毁失败没有后续可做，保留原因更有意义。
-      }
-    }
-
-    // 试过的路径、各自缺哪个文件、最后一次报错：排障缺一不可。
-    const reason = lastError ? `（最后一次失败：${lastError}）` : '';
-    const noFiles = incomplete.length > 0 ? `；${incomplete.join('；')}` : '';
-    this.failure = `没找到可用的 OCR 模型：试过 ${candidates.join('、')}${noFiles}${reason}。`
-      + '模型目录里必须平铺 det.onnx、rec.onnx、keys.txt 三个文件。';
+    return this.runtime.ensureOcrModel(resourceDir);
   }
 
   async recognize(png: Uint8Array, frameSize?: readonly [number, number]): Promise<OcrOutcome> {
-    const tasker = this.tasker;
-    if (!tasker) return { ok: false, error: this.failure ?? 'OCR 还没加载，先调用一次识别。' };
+    const tasker = this.runtime.taskerInstance;
+    if (!tasker) {
+      return { ok: false, error: this.runtime.ocrFailure ?? 'OCR 还没加载，先调用一次识别。' };
+    }
 
     const size = frameSize ?? (() => {
       const read = pngSize(png);
@@ -325,20 +256,6 @@ export class ArknightsOcr {
     }
   }
 
-  dispose(): void {
-    try {
-      this.tasker?.destroy();
-    } catch {
-      // 同上：销毁失败不影响下一次连接重建。
-    }
-    try {
-      this.resource?.destroy();
-    } catch {
-      // 同上。
-    }
-    this.tasker = null;
-    this.resource = null;
-    this.failure = null;
-    this.loading = null;
-  }
+  /** 生命周期由 `ArknightsRuntime` 管理：这里不销毁共享的 Tasker/Resource。 */
+  dispose(): void {}
 }

@@ -44,20 +44,26 @@ export interface MaaTaskJobLike extends MaaJobLike {
   get(): unknown;
 }
 
-/** Resource：只用到「加载 OCR 模型」这一件事。 */
+/** Resource：加载 OCR 模型，以及（可选）加载自有 pipeline 资源包。 */
 export interface MaaResourceLike {
   readonly loaded: boolean;
   post_ocr_model(path: string): MaaJobLike;
+  /** 旧绑定没有这个方法时，只是没有 pipeline 能力，OCR 仍然可用。 */
+  post_bundle?(path: string): MaaJobLike;
   destroy(): void;
 }
 
 /**
- * Tasker：只用来对单张图跑识别（`post_recognition`）。
- * 刻意不声明 `post_task`：本扩展不把控制权交给 pipeline。
+ * Tasker：对单张图跑识别（`post_recognition`），以及（可选）执行自有 pipeline。
+ *
+ * `post_task` / `post_stop` 声明为可选：旧绑定没有它们时只失去 pipeline 能力，
+ * 构造、连接与 OCR 都不受影响。
  */
 export interface MaaTaskerLike {
   resource: MaaResourceLike | null;
   controller: MaaControllerLike | null;
+  post_task?(entry: string, pipelineOverride?: Record<string, unknown> | string): MaaTaskJobLike;
+  post_stop?(): MaaJobLike;
   post_recognition(type: string, param: Record<string, unknown>, image: ArrayBuffer): MaaTaskJobLike;
   node_detail(id: number): unknown;
   recognition_detail(id: number): unknown;

@@ -12,6 +12,8 @@ import {
   type MaaModule,
 } from './native.ts';
 import { ArknightsOcr, builtinOcrModelDir, type OcrOutcome } from './ocr.ts';
+import { ArknightsPipeline, type PipelineResult } from './pipeline.ts';
+import { ArknightsRuntime } from './runtime.ts';
 import { aspectDeviation, is16by9 } from './geometry.ts';
 import { pickWindow, parseKeywords, describeDevices, type WindowInfo } from './window.ts';
 import { pngSize, toPngBytes } from './screen.ts';
@@ -66,8 +68,10 @@ function destroyQuietly(ctrl: MaaControllerLike | null): void {
 export class ArknightsSession {
   private ctrl: MaaControllerLike | null = null;
   private win: WindowInfo | null = null;
-  /** 连接时拿到的模块引用：OCR 要用它的 Resource/Tasker。 */
+  /** 连接时拿到的模块引用；Resource/Tasker 由 runtime 统一持有。 */
   private maa: MaaModule | null = null;
+  private runtime: ArknightsRuntime | null = null;
+  private pipeline: ArknightsPipeline | null = null;
   private ocr: ArknightsOcr | null = null;
   /** 最近一帧的真实像素尺寸；点击换算以它为准。 */
   private lastFrameSize: { width: number; height: number } | null = null;
@@ -189,6 +193,10 @@ export class ArknightsSession {
     this.ctrl = ctrl;
     this.win = win;
     this.maa = maa;
+    // OCR 与 pipeline 共用一个 Resource/Tasker：模型只加载一次。
+    this.runtime = new ArknightsRuntime(maa, ctrl, (line) => this.info(line), this.ocrBuiltinDir);
+    this.pipeline = new ArknightsPipeline(this.runtime);
+    this.ocr = null;
     let size = this.resolution;
     if (!size) {
       // 连接成功但还没拿到尺寸：抓一帧把尺寸带出来，顺便确认截图链路真的通。
@@ -326,23 +334,54 @@ export class ArknightsSession {
    * 都折成可读原因，由调用方决定降级成「只看图」。`resourceDir` 只用于覆盖包内模型。
    */
   async recognizeFrame(png: Uint8Array, resourceDir: string): Promise<OcrOutcome> {
-    const maa = this.maa;
-    const ctrl = this.ctrl;
-    if (!maa || !ctrl || !this.connected) {
+    const runtime = this.runtime;
+    if (!runtime || !this.ctrl || !this.connected) {
       return { ok: false, error: '识别失败：还没连接游戏窗口，先调用 ark_connect。' };
     }
     // 按这一帧自己的尺寸归一化，而不是「最近一帧」：两者不同时框会整体错位。
     const frame = pngSize(png);
     const size = frame ?? this.lastFrameSize;
     if (!size) return { ok: false, error: '识别失败：读不出这一帧的像素尺寸。' };
-    this.ocr ??= new ArknightsOcr(maa, ctrl, (line) => this.info(line), this.ocrBuiltinDir);
+    this.ocr ??= new ArknightsOcr(runtime);
     const loaded = await this.ocr.load(resourceDir);
     if (!loaded.ok) return { ok: false, error: `识别不可用：${loaded.error}` };
     return this.ocr.recognize(png, [size.width, size.height]);
   }
 
+  /**
+   * 跑一条自有 pipeline。OCR 模型与资源包按需加载；任务结束后抓一帧刷新尺寸，
+   * 因为 pipeline 用自己的截图链路点击，`lastFrameSize` 可能停在旧帧。
+   */
+  async runPipeline(
+    entry: string,
+    overrides: Record<string, unknown>,
+    resourceDir: string,
+    timeoutMs?: number,
+  ): Promise<PipelineResult> {
+    const runtime = this.runtime;
+    const pipeline = this.pipeline;
+    if (!runtime || !pipeline || !this.connected) {
+      return { ok: false, status: null, trace: [], error: 'pipeline 不可用：还没连接游戏窗口，先调用 ark_connect。' };
+    }
+    // pipeline 里的识别节点依赖 OCR 模型，先确保它在；模型缺失时不必再加载 bundle。
+    const model = await runtime.ensureOcrModel(resourceDir);
+    if (!model.ok) {
+      return { ok: false, status: null, trace: [], error: `pipeline 不可用：${model.error}` };
+    }
+    const bundle = await runtime.ensureBundle();
+    if (!bundle.ok) {
+      return { ok: false, status: null, trace: [], error: `pipeline 不可用：${bundle.error}` };
+    }
+    const result = await pipeline.run(entry, overrides, timeoutMs);
+    await this.screencap();
+    return result;
+  }
+
   async stop(): Promise<void> {
-    this.ocr?.dispose();
+    await this.pipeline?.stop();
+    this.pipeline = null;
+    this.runtime?.dispose();
+    this.runtime = null;
     this.ocr = null;
     destroyQuietly(this.ctrl);
     this.ctrl = null;
