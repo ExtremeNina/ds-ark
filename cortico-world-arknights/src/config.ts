@@ -56,6 +56,8 @@ export interface ArknightsConfigSection {
   deployDirectionMs: number;
   /** 可选：推荐给模型的关卡清单，逗号分隔（如 `1-7,CE-5`）。留空则由模型自行选关。 */
   easyStages: string;
+  /** pipeline 里列表/地图最多滑动几次；超过就停下并回报「没找到」。 */
+  navMaxScrolls: number;
 }
 
 export const ARKNIGHTS_DEFAULTS: ArknightsConfigSection = {
@@ -76,6 +78,8 @@ export const ARKNIGHTS_DEFAULTS: ArknightsConfigSection = {
   deployDirectionMs: 160,
   // 留空表示不限定：模型自己按画面挑关，并在动手前跟用户确认。
   easyStages: '',
+  // 与 pipeline JSON 里的默认 max_hit 一致；改配置会覆盖到对应滚动节点。
+  navMaxScrolls: 6,
 };
 
 /** 配置组的路径必须全部落在 `worlds.arknights.` 段内，且在 `defaults()` 里有对应项。 */
@@ -167,6 +171,16 @@ export const ARKNIGHTS_CONFIG_GROUP: ConfigGroup = {
         description:
           '逗号分隔的关卡名，如「1-7,CE-5」。模型接「随便打几关」这类指令时优先从这份清单里挑，'
           + '少一些瞎猜；留空则由模型自己按画面判断，并在动手前跟你确认。',
+        'x-hot': true,
+      },
+      'worlds.arknights.navMaxScrolls': {
+        type: 'number',
+        title: '导航 · 最多滑动次数',
+        description:
+          '选关时列表或地图最多滑动几次，超过就停下并如实回报「没找到」。默认 6，范围 1~20。'
+          + '改完下一次工具调用即生效。',
+        minimum: 1,
+        maximum: 20,
         'x-hot': true,
       },
       'worlds.arknights.resourceDir': {

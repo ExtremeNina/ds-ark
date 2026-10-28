@@ -11,9 +11,13 @@ import { planClick, planSwipe } from './battle/actions.ts';
 import { DEPLOY_DIRECTIONS, planDeploy } from './battle/deploy.ts';
 import { describeBattleState, parseBattleState } from './battle/state.ts';
 import { ARKNIGHTS_CONFIG_GROUP, type ArknightsConfigSection } from './config.ts';
-import { pausePoint } from './mfw/geometry.ts';
+import { pausePoint, toPoint } from './mfw/geometry.ts';
+import type { OcrLine } from './mfw/ocr.ts';
 import { SCREENSHOT_MIME, screenshotName } from './mfw/screen.ts';
 import { ArknightsSession } from './mfw/session.ts';
+import { roguelikeRoute, routeFor } from './nav/route.ts';
+import { describeSanity, parseSanity, sanityEnough } from './nav/sanity.ts';
+import { describeTrace } from './nav/trace.ts';
 
 const ENV_PROMPT_FILE = fileURLToPath(new URL('./ENV_PROMPT.md', import.meta.url));
 
@@ -125,6 +129,49 @@ export const ARKNIGHTS_TOOL_DECLS: ReadonlyArray<ToolSpec> = [
     },
   },
   {
+    name: 'ark_enter_stage',
+    description:
+      'Navigate to a stage with the built-in pipeline: resource stages (CE-5 / LS-5 / CA-5 / AP-5 / SK-5), '
+      + 'chip stages (PR-A-1 and friends), main-story stages (1-7) and supported SideStory stages. '
+      + 'It stops at the formation screen and never clicks 开始行动 unless start is true and the sanity check passes. '
+      + 'The receipt carries the executed node trace, the frame and the sanity reading; on failure it says where it stopped and clicks nothing.',
+    tags: ['act'],
+    parameters: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        stage_code: {
+          type: 'string',
+          description: 'Stage code such as 1-7, CE-5, LS-5, PR-A-1 or AD-8.',
+        },
+        start: {
+          type: 'boolean',
+          description: 'Start the battle after reaching the formation screen. Default false; requires a readable sanity check.',
+        },
+      },
+      required: ['stage_code'],
+    },
+  },
+  {
+    name: 'ark_open_roguelike',
+    description:
+      'Navigate to the home page of one Integrated Strategies theme (傀影 / 水月 / 萨米 / 萨卡兹 / 界园 / 黑流). '
+      + 'It stops at the theme page and never clicks 开始探索, so no run is started and no resource is consumed. '
+      + 'On failure it reports the executed node trace and the theme names currently visible.',
+    tags: ['act'],
+    parameters: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        theme: {
+          type: 'string',
+          description: 'Theme keyword, e.g. 傀影, 水月, 萨米, 萨卡兹, 界园 or 黑流.',
+        },
+      },
+      required: ['theme'],
+    },
+  },
+  {
     name: 'ark_wait',
     description:
       'Wait a number of milliseconds before doing anything else, e.g. to let deployment points regenerate. '
@@ -215,6 +262,18 @@ export const ARKNIGHTS_TOOL_DECLS: ReadonlyArray<ToolSpec> = [
 
 const fail = (text: string): ToolOutcome => ({ text, failed: true });
 
+/** 失败回执里列当前画面文字，最多 12 行，避免把整屏倒进上下文。 */
+function summarizeLines(lines: readonly OcrLine[], max = 12): string {
+  const sorted = [...lines].sort((a, b) => a.box.y - b.box.y || a.box.x - b.box.x).slice(0, max);
+  return sorted.map((line) => `「${line.text}」`).join('、');
+}
+
+/** 配置里可能是旧值/脏值；导航的滑动上限必须是一个可用的正整数。 */
+function scrollLimit(cfg: ArknightsConfigSection): number {
+  const raw = cfg.navMaxScrolls;
+  return typeof raw === 'number' && Number.isFinite(raw) ? Math.max(1, Math.min(20, Math.round(raw))) : 6;
+}
+
 /** 一帧的附件形状只在这里拼一次：mime、带时间戳的文件名、端点不收图时的降级文案。 */
 function frameBlob(png: Uint8Array, fallbackText: string): NonNullable<ToolOutcome['blobs']>[number] {
   return { bytes: png, mime: SCREENSHOT_MIME, name: screenshotName(new Date()), fallbackText };
@@ -256,6 +315,10 @@ export class ArknightsWorld implements World {
           return { ...decl, handler: () => this.battleState() };
         case 'ark_deploy':
           return { ...decl, handler: (args) => this.deploy(args) };
+        case 'ark_enter_stage':
+          return { ...decl, handler: (args) => this.enterStage(args) };
+        case 'ark_open_roguelike':
+          return { ...decl, handler: (args) => this.openRoguelike(args) };
         case 'ark_wait':
           return { ...decl, handler: (args) => this.wait(args) };
         case 'ark_click':
@@ -298,8 +361,9 @@ export class ArknightsWorld implements World {
       origin: 'internal',
       senderKey: this.id,
       text: '明日方舟 World 已挂载。ark_connect / ark_screencap / ark_set_paused / ark_battle_state / ark_deploy / '
-        + 'ark_wait / ark_click / ark_swipe / ark_ocr 可用；'
-        + '尚未连接游戏窗口。OCR 模型随包提供（resourceDir 仅用于覆盖），点击与拖拽都只保证「手势已发出」。',
+        + 'ark_enter_stage / ark_open_roguelike / ark_wait / ark_click / ark_swipe / ark_ocr 可用；'
+        + '尚未连接游戏窗口。OCR 模型随包提供（resourceDir 仅用于覆盖），点击与拖拽都只保证「手势已发出」；'
+        + '选关与集成战略入口用内置 pipeline，默认只到编队页/主题页，不替你开打。',
     });
   }
 
@@ -433,6 +497,154 @@ export class ArknightsWorld implements World {
       text: `${receipt}附件是拖拽之后的一帧，请据此判断是否落位成功、朝向是否正确；`
         + 'World 自己不做识别，也不会替你下结论。',
       blobs: [frameBlob(after.png, fallbackText)],
+    };
+  }
+
+  /**
+   * 跑一条导航 pipeline，并统一做「抓帧 + 识别 + 失败文案」。
+   *
+   * pipeline 只保证「点到了」，到这里还不算成功：终点画面要由这一帧的 OCR 复核。
+   */
+  private async runNavPipeline(
+    entry: string,
+    overrides: Record<string, unknown>,
+    label: string,
+  ): Promise<
+    | { ok: true; png: Uint8Array; lines: OcrLine[]; size: readonly [number, number]; trace: string; elapsedMs: number }
+    | { ok: false; text: string; png?: Uint8Array }
+  > {
+    const started = Date.now();
+    const result = await this.session.runPipeline(entry, overrides, this.opts.cfg.resourceDir);
+    const elapsedMs = Date.now() - started;
+    const trace = describeTrace(result.trace);
+
+    const shot = await this.session.screencap();
+    if (!shot.ok) {
+      return {
+        ok: false,
+        text: `${label}：pipeline ${result.ok ? '成功' : '失败'}，但补拍失败（${shot.error}）。轨迹：${trace}。`,
+      };
+    }
+    const size = this.session.resolution;
+    const ocr = await this.session.recognizeFrame(shot.png, this.opts.cfg.resourceDir);
+    const lines = ocr.ok ? [...ocr.lines] : [];
+
+    if (!result.ok) {
+      const visible = lines.length > 0 ? `当前可见文字：${summarizeLines(lines)}。` : '这一帧没有读到文字。';
+      return {
+        ok: false,
+        png: shot.png,
+        text: `${label}失败：${result.error ?? 'pipeline 没有成功结束'}。轨迹：${trace}。${visible}`
+          + '没有点击任何关卡/主题；需要时先用 ark_ocr 看画面，或让用户确认章节/活动是否已解锁。',
+      };
+    }
+    if (!size) {
+      return {
+        ok: false,
+        png: shot.png,
+        text: `${label}：pipeline 报告成功，但读不出这一帧的尺寸，无法确认画面。轨迹：${trace}。`,
+      };
+    }
+    return { ok: true, png: shot.png, lines, size: [size[0], size[1]], trace, elapsedMs };
+  }
+
+  /** 选关：资源本 / 芯片本 / 主线 / 已收录的 SideStory；默认停在编队页。 */
+  private async enterStage(args: Record<string, unknown>): Promise<ToolOutcome | string> {
+    if (!this.session.connected) return fail('选关失败：还没连接游戏窗口，先调用 ark_connect。');
+    const raw = typeof args.stage_code === 'string' ? args.stage_code : '';
+    const planned = routeFor(raw, { maxScrolls: scrollLimit(this.opts.cfg) });
+    if (!planned.ok) return fail(planned.error);
+    const route = planned.route;
+    const fallback = `${route.label}导航后的画面`;
+
+    const run = await this.runNavPipeline(route.entry, route.overrides, route.label);
+    if (!run.ok) {
+      return {
+        text: run.text,
+        failed: true,
+        ...(run.png ? { blobs: [frameBlob(run.png, fallback)] } : {}),
+      };
+    }
+
+    // pipeline 只负责点到；终点是不是编队页，以这一帧的 OCR 为准。
+    const formation = run.lines.some((line) => /开始行动|代理指挥/.test(line.text));
+    if (!formation) {
+      return {
+        text: `pipeline 报告成功，但当前画面里没读到「开始行动」，不能确认已到编队页（${route.label}）。`
+          + `轨迹：${run.trace}。附件是当前帧。`,
+        failed: true,
+        blobs: [frameBlob(run.png, fallback)],
+      };
+    }
+
+    const sanity = parseSanity(run.lines);
+    const sanityText = describeSanity(sanity);
+    const head = `已到编队界面（${route.label}）。轨迹：${run.trace}。用时 ${run.elapsedMs}ms。${sanityText}。`;
+
+    if (args.start !== true) {
+      return {
+        text: `${head}没有点击「开始行动」——确认要消耗理智后，再调用 ark_click 点它，或传 start: true。`,
+        blobs: [frameBlob(run.png, fallback)],
+      };
+    }
+
+    const enough = sanityEnough(sanity);
+    if (enough !== true) {
+      return {
+        text: `${head}${enough === false ? '理智不够' : '读不出这次消耗或当前理智'}，因此没有点击「开始行动」。`,
+        blobs: [frameBlob(run.png, fallback)],
+      };
+    }
+
+    const startLine = run.lines.find((line) => line.text.includes('开始行动'));
+    if (!startLine) {
+      return {
+        text: `${head}没有找到「开始行动」的文字框，因此没有点击。`,
+        failed: true,
+        blobs: [frameBlob(run.png, fallback)],
+      };
+    }
+    const at = toPoint(
+      { x: startLine.box.x + startLine.box.w / 2, y: startLine.box.y + startLine.box.h / 2 },
+      run.size,
+    );
+    const clicked = await this.session.click(at.x, at.y);
+    if (!clicked.ok) return fail(`已到编队界面（${route.label}），但点击「开始行动」失败：${clicked.error}`);
+    return this.withAfterFrame(`${head}已点击「开始行动」（${at.x}, ${at.y}）。`, '开始行动');
+  }
+
+  /** 集成战略：只到指定主题主页，不点「开始探索」。 */
+  private async openRoguelike(args: Record<string, unknown>): Promise<ToolOutcome | string> {
+    if (!this.session.connected) return fail('打开集成战略失败：还没连接游戏窗口，先调用 ark_connect。');
+    const theme = typeof args.theme === 'string' ? args.theme.trim() : '';
+    const planned = roguelikeRoute(theme, { maxScrolls: scrollLimit(this.opts.cfg) });
+    if (!planned.ok) return fail(planned.error);
+    const route = planned.route;
+    const fallback = `${route.label}主题页`;
+
+    const run = await this.runNavPipeline(route.entry, route.overrides, route.label);
+    if (!run.ok) {
+      return {
+        text: run.text.replace('没有点击任何关卡/主题', '没有点击任何主题，也没有点「开始探索」'),
+        failed: true,
+        ...(run.png ? { blobs: [frameBlob(run.png, fallback)] } : {}),
+      };
+    }
+
+    const home = run.lines.some((line) => /开始探索|深入调查/.test(line.text));
+    if (!home) {
+      return {
+        text: `pipeline 报告成功，但当前画面里没读到「开始探索」，不能确认已到「${theme}」主题页。`
+          + `轨迹：${run.trace}。附件是当前帧。`,
+        failed: true,
+        blobs: [frameBlob(run.png, fallback)],
+      };
+    }
+
+    return {
+      text: `已到「${theme}」主题页面（读到「开始探索」）。轨迹：${run.trace}。用时 ${run.elapsedMs}ms。`
+        + '没有点击「开始探索」——确认要开一局再自己点，或让用户决定。',
+      blobs: [frameBlob(run.png, fallback)],
     };
   }
 
