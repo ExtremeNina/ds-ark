@@ -1,5 +1,6 @@
 import { parseCopilotPlan, resolveActionTile, resolveHandCardPosition } from './battle/copilot.ts';
 import { compareFormation, fetchCopilotPlan } from './battle/copilot-fetch.ts';
+import { executeCopilotPlan } from './battle/copilot-executor.ts';
 import { getStageDimension } from './battle/tile-pos.ts';
 import { findOperatorByName, parseVisibleOperators } from './battle/operators.ts';
 /**
@@ -512,177 +513,24 @@ export class ArknightsWorld implements World {
       ? Math.max(10, Math.min(600, Math.round(args.maxSeconds)))
       : 180;
 
-    const dimension = getStageDimension(plan.stage_name, this.opts.cfg.resourceDir);
-    const logs: string[] = [];
-    const startTime = Date.now();
+    const tasker = this.session.runtimeInstance?.taskerInstance ?? null;
+    const resource = this.session.runtimeInstance?.resourceInstance ?? null;
 
-    logs.push(`开始执行关卡【${plan.stage_name}】Copilot 作业，共 ${plan.actions.length} 步动作。`);
+    const outcome = await executeCopilotPlan({
+      plan,
+      cfg: this.opts.cfg,
+      session: this.session,
+      tasker,
+      resource,
+      maxSeconds,
+    });
 
-    let finalShot: Uint8Array | null = null;
-    let battleFinished = false;
-    let battleResultText = '战斗仍在进行或已超时';
-    let deployedCount = 0;
+    const reportText = `Copilot 作业执行汇报：\n- 执行引擎：${outcome.engine === 'maacore' ? 'MaaCore 原生全权托管' : '内置轻量解释器'}\n- 战果状态：${outcome.resultText}\n- 执行用时：${(outcome.durationMs / 1000).toFixed(1)} 秒\n- 执行日志：\n${outcome.logs.map((l) => '  * ' + l).join('\n')}`;
 
-    for (let i = 0; i < plan.actions.length; i++) {
-      if (Date.now() - startTime > maxSeconds * 1000) {
-        logs.push(`达到最大超时限制（${maxSeconds}秒），停止后续动作。`);
-        break;
-      }
-
-      const act = plan.actions[i]!;
-      const actType = act.type;
-      let lastBattleState: ReturnType<typeof parseBattleState> | null = null;
-
-      // 检查战斗是否提前结束
-      const shot = await this.session.screencap();
-      if (shot.ok) {
-        finalShot = shot.png;
-        const ocr = await this.session.recognizeFrame(shot.png, this.opts.cfg.resourceDir);
-        if (ocr.ok) {
-          const state = parseBattleState(ocr.lines);
-          lastBattleState = state;
-          if (state.result === 'victory') {
-            logs.push('检测到【作战胜利】（行动结束）！');
-            battleFinished = true;
-            battleResultText = '作战胜利（行动结束）';
-            break;
-          }
-          if (state.result === 'defeat') {
-            logs.push('检测到【作战失败】！');
-            battleFinished = true;
-            battleResultText = '作战失败';
-            break;
-          }
-        }
-      }
-
-      // 等待费用满足
-      if (typeof act.costs === 'number' && act.costs > 0) {
-        let waitCount = 0;
-        while (waitCount < 20) {
-          const s = await this.session.screencap();
-          if (s.ok) {
-            finalShot = s.png;
-            const ocr = await this.session.recognizeFrame(s.png, this.opts.cfg.resourceDir);
-            if (ocr.ok) {
-              const state = parseBattleState(ocr.lines);
-              lastBattleState = state;
-              if (state.result) {
-                battleFinished = true;
-                battleResultText = state.result === 'victory' ? '作战胜利（行动结束）' : '作战失败';
-                break;
-              }
-              if (state.cost !== null && state.cost >= act.costs) {
-                break;
-              }
-            }
-          }
-          await new Promise((r) => setTimeout(r, 1000));
-          waitCount++;
-        }
-        if (battleFinished) break;
-      }
-
-      // 执行动作
-      if (actType === 'SpeedUp' || actType === '二倍速') {
-        // 2倍速按钮位置 (0.938, 0.052)
-        const px = Math.round(0.938 * size[0]);
-        const py = Math.round(0.052 * size[1]);
-        await this.session.click(px, py);
-        logs.push(`第 ${i + 1} 步：点击二倍速加速。`);
-      } else if (actType === 'Deploy' || actType === '部署') {
-        const tile = resolveActionTile(act, dimension);
-        if (!tile) {
-          logs.push(`第 ${i + 1} 步（部署 ${act.name || ''}）：缺少目标地块位置，已跳过。`);
-          continue;
-        }
-
-        // 动态计算手牌卡槽，避免固定死坐标盲拖
-        const cardNorm = resolveHandCardPosition(act, {
-          handCosts: lastBattleState?.handCosts,
-          deployedCount,
-        });
-        const dir = (act.direction?.toLowerCase() || 'right') as 'up' | 'down' | 'left' | 'right';
-        const planned = planDeploy(cardNorm, tile, dir, size, {
-          holdMs: this.opts.cfg.deployHoldMs,
-          gapMs: this.opts.cfg.deployGapMs,
-          directionMs: this.opts.cfg.deployDirectionMs,
-        });
-
-        if (planned.ok) {
-          const { plan: dp } = planned;
-          await this.session.swipe(dp.card.x, dp.card.y, dp.tile.x, dp.tile.y, dp.holdMs);
-          if (dp.gapMs > 0) await new Promise((r) => setTimeout(r, dp.gapMs));
-          await this.session.swipe(dp.tile.x, dp.tile.y, dp.release.x, dp.release.y, dp.directionMs);
-          deployedCount++;
-          logs.push(`第 ${i + 1} 步：部署【${act.name || '干员'}】（卡槽 x≈${cardNorm.x.toFixed(2)}）到地块 (${tile.x}, ${tile.y}) 朝向 ${dir}。`);
-        } else {
-          logs.push(`第 ${i + 1} 步：部署规划失败（${planned.error}）。`);
-        }
-      } else if (actType === 'Skill' || actType === '技能') {
-        const tile = resolveActionTile(act, dimension);
-        if (tile) {
-          const px = Math.round(tile.x * size[0]);
-          const py = Math.round(tile.y * size[1]);
-          await this.session.click(px, py);
-          await new Promise((r) => setTimeout(r, 200));
-          // 点击技能按钮（干员头顶稍上方）
-          await this.session.click(px, Math.max(0, py - 60));
-          logs.push(`第 ${i + 1} 步：激活干员【${act.name || ''}】技能。`);
-        }
-      } else if (actType === 'Retreat' || actType === '撤退') {
-        const tile = resolveActionTile(act, dimension);
-        if (tile) {
-          const px = Math.round(tile.x * size[0]);
-          const py = Math.round(tile.y * size[1]);
-          await this.session.click(px, py);
-          await new Promise((r) => setTimeout(r, 200));
-          // 点击撤退图标（左上方）
-          await this.session.click(Math.max(0, px - 60), Math.max(0, py - 60));
-          logs.push(`第 ${i + 1} 步：撤退干员【${act.name || ''}】。`);
-        }
-      }
-
-      if (act.delay && act.delay > 0) {
-        await new Promise((r) => setTimeout(r, Math.min(10000, act.delay!)));
-      }
-    }
-
-    // 后续轮询直到战斗结束或超时
-    if (!battleFinished) {
-      logs.push('所有预定部署动作已下发，等待战斗自动进行至结算...');
-      let pollCount = 0;
-      while (pollCount < 30 && Date.now() - startTime < maxSeconds * 1000) {
-        await new Promise((r) => setTimeout(r, 3000));
-        pollCount++;
-        const s = await this.session.screencap();
-        if (s.ok) {
-          finalShot = s.png;
-          const ocr = await this.session.recognizeFrame(s.png, this.opts.cfg.resourceDir);
-          if (ocr.ok) {
-            const state = parseBattleState(ocr.lines);
-            if (state.result === 'victory') {
-              battleResultText = '作战胜利（行动结束）';
-              battleFinished = true;
-              break;
-            }
-            if (state.result === 'defeat') {
-              battleResultText = '作战失败';
-              battleFinished = true;
-              break;
-            }
-          }
-        }
-      }
-    }
-
-    const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
-    const reportText = `Copilot 作业执行汇报：\n- 战果状态：${battleResultText}\n- 执行用时：${elapsed} 秒\n- 执行日志：\n${logs.map((l) => '  * ' + l).join('\n')}`;
-
-    if (finalShot) {
+    if (outcome.finalShot) {
       return {
         text: reportText,
-        blobs: [frameBlob(finalShot, '战斗最终画面')],
+        blobs: [frameBlob(outcome.finalShot, '战斗最终画面')],
       };
     }
     return reportText;
