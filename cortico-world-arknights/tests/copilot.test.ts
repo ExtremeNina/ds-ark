@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { normalizeDirection, parseCopilotPlan, resolveActionTile } from '../src/battle/copilot.ts';
+import { normalizeDirection, parseCopilotPlan, resolveActionTile, resolveHandCardPosition } from '../src/battle/copilot.ts';
 import { compareFormation, fetchCopilotPlan } from '../src/battle/copilot-fetch.ts';
 
 describe('copilot 计划解析与校验', () => {
@@ -74,5 +74,42 @@ describe('copilot-fetch 抄作业与编队比对', () => {
     expect(cmp.canExecuteDirectly).toBe(false);
     expect(cmp.missing).toContain('芬');
     expect(cmp.notes).toContain('请向用户询问');
+  });
+
+  describe('resolveHandCardPosition 手牌动态卡槽定位', () => {
+    it('当识别到手牌费用且精确匹配时，返回真实手牌坐标', () => {
+      const handCosts = [
+        { cost: 10, x: 0.25 },
+        { cost: 14, x: 0.50 },
+        { cost: 20, x: 0.85 },
+      ];
+      const pos = resolveHandCardPosition({ type: 'Deploy', name: '芬', costs: 10 }, { handCosts });
+      expect(pos.x).toBe(0.25);
+      expect(pos.y).toBe(0.88);
+    });
+
+    it('当费用存在 ±1 潜能公差时，依然能精准命中', () => {
+      const handCosts = [{ cost: 9, x: 0.32 }];
+      const pos = resolveHandCardPosition({ type: 'Deploy', name: '芬', costs: 10 }, { handCosts });
+      expect(pos.x).toBe(0.32);
+    });
+
+    it('当费用未匹配但有手牌时，按 deployedCount 顺位选择而不是抓空', () => {
+      const handCosts = [
+        { cost: 12, x: 0.30 },
+        { cost: 18, x: 0.60 },
+      ];
+      const pos = resolveHandCardPosition({ type: 'Deploy', name: '未知' }, { handCosts, deployedCount: 1 });
+      expect(pos.x).toBe(0.60);
+    });
+
+    it('当没有任何 OCR 手牌数据时，随部署次数动态偏移，绝不抓死同一坐标', () => {
+      const pos0 = resolveHandCardPosition({ type: 'Deploy' }, { deployedCount: 0 });
+      const pos1 = resolveHandCardPosition({ type: 'Deploy' }, { deployedCount: 1 });
+      const pos2 = resolveHandCardPosition({ type: 'Deploy' }, { deployedCount: 2 });
+      expect(pos0.x).toBe(0.82);
+      expect(pos1.x).toBeLessThan(pos0.x);
+      expect(pos2.x).toBeLessThan(pos1.x);
+    });
   });
 });

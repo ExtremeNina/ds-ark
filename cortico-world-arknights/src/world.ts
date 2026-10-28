@@ -1,4 +1,4 @@
-import { parseCopilotPlan, resolveActionTile } from './battle/copilot.ts';
+import { parseCopilotPlan, resolveActionTile, resolveHandCardPosition } from './battle/copilot.ts';
 import { compareFormation, fetchCopilotPlan } from './battle/copilot-fetch.ts';
 import { getStageDimension } from './battle/tile-pos.ts';
 import { findOperatorByName, parseVisibleOperators } from './battle/operators.ts';
@@ -521,6 +521,7 @@ export class ArknightsWorld implements World {
     let finalShot: Uint8Array | null = null;
     let battleFinished = false;
     let battleResultText = '战斗仍在进行或已超时';
+    let deployedCount = 0;
 
     for (let i = 0; i < plan.actions.length; i++) {
       if (Date.now() - startTime > maxSeconds * 1000) {
@@ -530,6 +531,7 @@ export class ArknightsWorld implements World {
 
       const act = plan.actions[i]!;
       const actType = act.type;
+      let lastBattleState: ReturnType<typeof parseBattleState> | null = null;
 
       // 检查战斗是否提前结束
       const shot = await this.session.screencap();
@@ -538,6 +540,7 @@ export class ArknightsWorld implements World {
         const ocr = await this.session.recognizeFrame(shot.png, this.opts.cfg.resourceDir);
         if (ocr.ok) {
           const state = parseBattleState(ocr.lines);
+          lastBattleState = state;
           if (state.result === 'victory') {
             logs.push('检测到【作战胜利】（行动结束）！');
             battleFinished = true;
@@ -563,6 +566,7 @@ export class ArknightsWorld implements World {
             const ocr = await this.session.recognizeFrame(s.png, this.opts.cfg.resourceDir);
             if (ocr.ok) {
               const state = parseBattleState(ocr.lines);
+              lastBattleState = state;
               if (state.result) {
                 battleFinished = true;
                 battleResultText = state.result === 'victory' ? '作战胜利（行动结束）' : '作战失败';
@@ -593,8 +597,11 @@ export class ArknightsWorld implements World {
           continue;
         }
 
-        // 手牌区默认中右部 (x ≈ 0.82, y ≈ 0.88)
-        const cardNorm = { x: 0.82, y: 0.88 };
+        // 动态计算手牌卡槽，避免固定死坐标盲拖
+        const cardNorm = resolveHandCardPosition(act, {
+          handCosts: lastBattleState?.handCosts,
+          deployedCount,
+        });
         const dir = (act.direction?.toLowerCase() || 'right') as 'up' | 'down' | 'left' | 'right';
         const planned = planDeploy(cardNorm, tile, dir, size, {
           holdMs: this.opts.cfg.deployHoldMs,
@@ -607,7 +614,8 @@ export class ArknightsWorld implements World {
           await this.session.swipe(dp.card.x, dp.card.y, dp.tile.x, dp.tile.y, dp.holdMs);
           if (dp.gapMs > 0) await new Promise((r) => setTimeout(r, dp.gapMs));
           await this.session.swipe(dp.tile.x, dp.tile.y, dp.release.x, dp.release.y, dp.directionMs);
-          logs.push(`第 ${i + 1} 步：部署【${act.name || '干员'}】到地块 (${tile.x}, ${tile.y}) 朝向 ${dir}。`);
+          deployedCount++;
+          logs.push(`第 ${i + 1} 步：部署【${act.name || '干员'}】（卡槽 x≈${cardNorm.x.toFixed(2)}）到地块 (${tile.x}, ${tile.y}) 朝向 ${dir}。`);
         } else {
           logs.push(`第 ${i + 1} 步：部署规划失败（${planned.error}）。`);
         }

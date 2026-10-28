@@ -112,3 +112,42 @@ export function resolveActionTile(action: CopilotAction, dimension: MapDimension
   if (!action.location) return null;
   return tileToScreen(action.location, dimension);
 }
+
+export interface HandCardResolutionContext {
+  readonly handCosts?: ReadonlyArray<{ readonly cost: number; readonly x: number }>;
+  readonly actionIndex?: number;
+  readonly deployedCount?: number;
+}
+
+/**
+ * 动态计算待部署卡牌在屏幕底部的归一化位置 (x, y)，彻底解决固定硬编码盲拖问题。
+ * 1. 优先度 1：若 OCR 识别到了手牌费用，且与待部署动作费用相符（或相差不超过 1 费潜能公差），使用该卡牌真实坐标。
+ * 2. 优先度 2：若 OCR 识别到了手牌但费用未匹配，按已部署干员数在识别到的手牌队列中顺位选取。
+ * 3. 优先度 3（保底）：若 OCR 未能识别到手牌，根据已部署干员数动态偏移，避免死抓同一坐标。
+ */
+export function resolveHandCardPosition(
+  action: CopilotAction,
+  ctx: HandCardResolutionContext = {},
+): { x: number; y: number } {
+  const y = 0.88;
+  const handCosts = ctx.handCosts ?? [];
+
+  if (handCosts.length > 0) {
+    if (typeof action.costs === 'number' && Number.isFinite(action.costs)) {
+      // 容差 ±1（潜能减费常为 1 点）
+      const matched = handCosts.find((c) => Math.abs(c.cost - action.costs!) <= 1);
+      if (matched) {
+        return { x: matched.x, y };
+      }
+    }
+    // 没按费用精准匹配，按已部署数量在当前手牌从右往左（或从左往右）顺位选取
+    const index = Math.min(ctx.deployedCount ?? 0, handCosts.length - 1);
+    return { x: handCosts[index]!.x, y };
+  }
+
+  // 保底：默认从右侧主力手牌区 (0.82) 开始，随部署动作依次向左切换槽位
+  const step = (ctx.deployedCount ?? 0) % 5;
+  const x = Math.max(0.30, Math.min(0.88, 0.82 - step * 0.11));
+  return { x, y };
+}
+
