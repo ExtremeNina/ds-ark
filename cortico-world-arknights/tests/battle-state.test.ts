@@ -234,6 +234,24 @@ describe('战场状态解析', () => {
     expect(state.handCosts.map((c) => c.cost)).toEqual([16]);
   });
 
+  it('认到胜利横幅且无失败字样时判定为 victory', () => {
+    const state = parseBattleState([line('行动结束', 0.4, 0.4, 0.2, 0.1)]);
+    expect(state.result).toBe('victory');
+  });
+
+  it('出现理智返还或放弃行动时断然判定为 defeat，杜绝误判为胜利', () => {
+    // 玩家主动退出或失败时，画面上方常有「行动结束」，但下方有「理智返还 6」
+    const state = parseBattleState([
+      line('行动结束', 0.4, 0.1, 0.2, 0.05),
+      line('理智返还 6', 0.5, 0.6, 0.1, 0.04),
+    ]);
+    expect(state.result).toBe('defeat');
+
+    const desc = describeBattleState(state);
+    expect(desc).toContain('画面显示本局失败或已退出');
+    expect(desc).not.toContain('胜利');
+  });
+
   it('手牌按排聚类：即便区间放进来了，偏离卡费行的数字也会被剔除', () => {
     const state = parseBattleState([
       line('12', 0.10, 0.83, 0.04, 0.03),

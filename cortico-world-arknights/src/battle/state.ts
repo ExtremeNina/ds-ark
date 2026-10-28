@@ -30,20 +30,12 @@ const RATIO = /^(\d+)\/(\d+)$/;
 /** 暂停横幅上的字：PAUSE 可能被认成 PAUS/PAUSF，中文则是「暂停中」。 */
 const PAUSE_BANNER = /paus|暂停/i;
 /**
- * 结算横幅：失败先判，避免同一帧里两种字样都出现时误报胜利。
- * 国服胜利是「行动结束」、失败是「作战失败」；英文客户端是 MISSION ACCOMPLISHED / FAILED。
+ * 结算横幅判定：
+ * 任何包含「作战失败 / 行动失败 / 放弃行动 / 理智返还 / MISSION FAILED」的画面断然判定为 defeat。
+ * 只有在整屏绝不包含上述失败/退出字样、且包含「作战胜利 / 行动结束 / MISSION ACCOMPLISHED」时才判为 victory。
  */
-const RESULT_WORDS: ReadonlyArray<{ readonly result: BattleResult; readonly pattern: RegExp }> = [
-  { result: 'defeat', pattern: /作战失败|行动失败|MISSION\s*FAILED/i },
-  { result: 'victory', pattern: /行动结束|作战胜利|MISSION\s*ACCOMPLISHED/i },
-];
-
-function matchResult(text: string): BattleResult | null {
-  for (const entry of RESULT_WORDS) {
-    if (entry.pattern.test(text)) return entry.result;
-  }
-  return null;
-}
+const DEFEAT_PATTERN = /作战失败|行动失败|放弃行动|理智返还|返还理智|MISSION\s*FAILED/i;
+const VICTORY_PATTERN = /作战胜利|行动结束|MISSION\s*ACCOMPLISHED/i;
 /** 只含数字与常见误识字符：0↔O/o、1↔I/l/|，外加分隔用的斜杠。 */
 const DIGIT_LIKE = /^[0-9OoIl|/]+$/;
 /** 手牌卡费：最多两个非数字前缀（卡面图标被认成字母，如 `N16`），后面接 1~2 位数字。 */
@@ -145,16 +137,19 @@ export function parseBattleState(lines: readonly OcrLine[]): BattleState {
   let life: number | null = null;
   let enemies: string | null = null;
   let paused: boolean | null = null;
-  let result: BattleResult | null = null;
+  let hasDefeat = false;
+  let hasVictory = false;
   const handCandidates: HandCandidate[] = [];
 
   for (const line of lines) {
     const text = line.text.trim();
     if (!text) continue;
 
-    // 结算横幅可能出现在画面中部（`unknown` 区），所以先按整句文字判一次，再按区域归类。
-    if (result === null) {
-      result = matchResult(text);
+    // 优先检测战败或主动放弃退出（理智返还），整局只要出现任何败退信号即断言为 defeat
+    if (DEFEAT_PATTERN.test(text)) {
+      hasDefeat = true;
+    } else if (VICTORY_PATTERN.test(text)) {
+      hasVictory = true;
     }
 
     switch (regionOf(line.box)) {
@@ -192,6 +187,7 @@ export function parseBattleState(lines: readonly OcrLine[]): BattleState {
 
   const handCosts = dedupeByX(keepHandRow(handCandidates))
     .map(({ cost: value, x }) => ({ cost: value, x }));
+  const result: BattleResult | null = hasDefeat ? 'defeat' : (hasVictory ? 'victory' : null);
   return { cost, life, enemies, paused, handCosts, result };
 }
 
@@ -217,7 +213,7 @@ export function describeBattleState(state: BattleState): string {
 
   const parts: string[] = [];
   if (state.result === 'victory') parts.push('画面显示本局已结束（行动结束／胜利）。');
-  if (state.result === 'defeat') parts.push('画面显示本局失败（作战失败）。');
+  if (state.result === 'defeat') parts.push('画面显示本局失败或已退出（作战失败／放弃行动／理智返还）。');
   parts.push(known.length > 0 ? `识别到：${known.join('，')}。` : '这一帧没有识别出任何数字。');
   if (state.result === null) {
     parts.push(
