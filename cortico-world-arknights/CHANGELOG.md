@@ -8,6 +8,8 @@
 - 失败回执包含执行轨迹、最后节点与当前画面文字，零点击；`navMaxScrolls` 配置覆盖滚动节点的 `max_hit`。
 - 冒烟脚本新增 `--ping` / `--enter <代号>` / `--roguelike <主题>`，真机校准顺序：Ping → 资源本 → 主线 → 活动 → 主题页，只调 ROI 不改节点结构。
 - 明确资源边界（Agent.md / README / AGENTS.md / assets/README）：仓库只放代码与自有 pipeline，不打包 MAA 的 `tasks/`、`template/`、`copilot/`、`roguelike/`、`Arknights-Tile-Pos/`；OCR 模型继续随包。上架后由扩展页 README 详述资源来源与安装。
+- 真机实测修正：`ark_swipe` 的最小位移从 2 像素放宽到 1——3D 章节地图/战场上 `ark_click` 会被游戏当成镜头微移，1px 微拖拽才是点开关卡牌的可靠手势。
+- 环境提示词新增「主线的两级导航」：曲谱画廊默认停在最新章节（先读屏判断当前卡再滑）、画廊层找不到目标章节就停的层级护栏、章节地图的小步长拖拽与 ◀/▶ 切集、3D 场景用 1px 微拖拽代替点击。
 - 测试新增：代号归一化与路由、pipeline JSON 结构校验（节点唯一、next/on_error 存在、禁止 MAA 字段）、假 maa 的 bundle/override/超时/停止，以及两个工具的成功/失败/未连接用例。
 
 ## 0.2.0
