@@ -10,6 +10,8 @@ import { withTimeout } from '../mfw/timeout.ts';
 import type { CopilotPlan } from './copilot.ts';
 
 const COMMON_MAA_RESOURCE_PATHS = [
+  'D:/soft/MAA-v6/resource',
+  'D:/soft/MAA-v6',
   'C:/Program Files/MAA/resource',
   'D:/Program Files/MAA/resource',
   'C:/MAA/resource',
@@ -20,28 +22,46 @@ const COMMON_MAA_RESOURCE_PATHS = [
 
 /**
  * 探测可用的 MAA 完整官方资源目录。
- * 1. 优先使用配置项传入的路径；
+ * 1. 优先使用配置项传入的路径（支持直接传安装根目录，自动深入到 resource）；
  * 2. 依次探测常见盘符安装路径。
  */
 export function findMaaResourceDir(configuredDir?: string): string | null {
   if (configuredDir && configuredDir.trim()) {
     const candidate = configuredDir.trim();
-    if (isValidMaaResource(candidate)) return candidate;
+    return normalizeMaaResourceDir(candidate);
   }
 
   for (const candidate of COMMON_MAA_RESOURCE_PATHS) {
-    if (isValidMaaResource(candidate)) return candidate;
+    const normalized = normalizeMaaResourceDir(candidate);
+    if (normalized) return normalized;
   }
 
   return null;
 }
 
+function normalizeMaaResourceDir(candidate: string): string | null {
+  if (!existsSync(candidate)) return null;
+  // 若传入的是包含 resource 的安装根目录，优先深入到 resource
+  const subRes = join(candidate, 'resource');
+  if (existsSync(subRes) && isValidMaaResource(subRes)) {
+    return subRes;
+  }
+  if (isValidMaaResource(candidate)) {
+    return candidate;
+  }
+  return null;
+}
+
 function isValidMaaResource(dir: string): boolean {
   if (!existsSync(dir)) return false;
-  // 必须具备 pipeline 或 image 目录
+  // 兼顾 MaaFramework (pipeline/image) 与 MAA 桌面版 (template/copilot/tasks/Arknights-Tile-Pos)
   const hasPipeline = existsSync(join(dir, 'pipeline'));
   const hasImage = existsSync(join(dir, 'image'));
-  return hasPipeline || hasImage;
+  const hasTemplate = existsSync(join(dir, 'template'));
+  const hasCopilot = existsSync(join(dir, 'copilot'));
+  const hasTasks = existsSync(join(dir, 'tasks'));
+  const hasTilePos = existsSync(join(dir, 'Arknights-Tile-Pos'));
+  return hasPipeline || hasImage || hasTemplate || hasCopilot || hasTasks || hasTilePos;
 }
 
 /** 检查当前环境是否具备 MaaCore 原生战斗托管能力 */
