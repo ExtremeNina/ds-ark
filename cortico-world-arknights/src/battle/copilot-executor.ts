@@ -37,7 +37,8 @@ export interface ExecuteCopilotContext {
 export async function executeCopilotPlan(ctx: ExecuteCopilotContext): Promise<CopilotExecutionResult> {
   const { plan, cfg, session, maxSeconds = 180, info } = ctx;
   const engine: CopilotEngine = cfg.copilotEngine || 'auto';
-  const maaSupported = isMaaCoreBattleSupported(cfg.maaResourceDir);
+  const maaDirCandidate = cfg.maaResourceDir || cfg.resourceDir;
+  const maaSupported = isMaaCoreBattleSupported(maaDirCandidate);
   const fallbackLogs: string[] = [];
 
   if (engine === 'maacore') {
@@ -56,7 +57,7 @@ export async function executeCopilotPlan(ctx: ExecuteCopilotContext): Promise<Co
     const maaOutcome = await runMaaCoreCopilot({
       plan,
       hwnd: session.window?.handle,
-      maaResourceDir: cfg.maaResourceDir,
+      maaResourceDir: maaDirCandidate,
       maxSeconds,
       info,
     });
@@ -75,7 +76,7 @@ export async function executeCopilotPlan(ctx: ExecuteCopilotContext): Promise<Co
     const maaOutcome = await runMaaCoreCopilot({
       plan,
       hwnd: session.window?.handle,
-      maaResourceDir: cfg.maaResourceDir,
+      maaResourceDir: maaDirCandidate,
       maxSeconds,
       info,
     });
