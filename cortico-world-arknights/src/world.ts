@@ -131,8 +131,9 @@ export const ARKNIGHTS_TOOL_DECLS: ReadonlyArray<ToolSpec> = [
   {
     name: 'ark_enter_stage',
     description:
-      'Navigate to a stage with the built-in pipeline: resource stages (CE-5 / LS-5 / CA-5 / AP-5 / SK-5), '
-      + 'chip stages (PR-A-1 and friends), main-story stages (1-7) and supported SideStory stages. '
+      'Navigate to a stage with the built-in pipeline: ALL main-story stages (0-1, 1-7, 2-10, 3-8, etc.), '
+      + 'resource stages (CE-5 / LS-5 / CA-5 / AP-5 / SK-5), chip stages (PR-A-1 and friends), and supported SideStory stages. '
+      + 'ALWAYS call this tool whenever the user asks to go to ANY stage (e.g. 2-10 or 1-7); DO NOT manually click menus! '
       + 'It stops at the formation screen and never clicks 开始行动 unless start is true and the sanity check passes. '
       + 'The receipt carries the executed node trace, the frame and the sanity reading; on failure it says where it stopped and clicks nothing.',
     tags: ['act'],
@@ -142,7 +143,7 @@ export const ARKNIGHTS_TOOL_DECLS: ReadonlyArray<ToolSpec> = [
       properties: {
         stage_code: {
           type: 'string',
-          description: 'Stage code such as 1-7, CE-5, LS-5, PR-A-1 or AD-8.',
+          description: 'Stage code such as 1-7, 2-10, 3-8, CE-5, LS-5, PR-A-1 or AD-8.',
         },
         start: {
           type: 'boolean',
