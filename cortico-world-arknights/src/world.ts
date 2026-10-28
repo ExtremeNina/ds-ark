@@ -1,3 +1,7 @@
+import { parseCopilotPlan, resolveActionTile } from './battle/copilot.ts';
+import { compareFormation, fetchCopilotPlan } from './battle/copilot-fetch.ts';
+import { getStageDimension } from './battle/tile-pos.ts';
+import { findOperatorByName, parseVisibleOperators } from './battle/operators.ts';
 /**
  * World 实现：九个工具（连接、截图、暂停/恢复、读战场、点选部署、等待、通用点击/拖拽/读屏）、
  * 一条挂载事件与环境提示词。
@@ -267,6 +271,74 @@ export const ARKNIGHTS_TOOL_DECLS: ReadonlyArray<ToolSpec> = [
       required: [],
     },
   },
+  {
+    name: 'ark_find_operators',
+    description:
+      'Recognise operator cards on screen (formation screen, operator picker, or roster). '
+      + 'Returns detected operator names with normalised center coordinates (x, y). '
+      + 'If name is provided, searches for that specific operator and optionally scrolls horizontally if not found.',
+    tags: ['read'],
+    parameters: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        name: {
+          type: 'string',
+          description: 'Optional: operator name to search for (e.g. "克洛丝"). If omitted, lists all visible operators.',
+        },
+        scroll: {
+          type: 'boolean',
+          description: 'Optional: if name is specified and not visible on screen, scroll the list to find them (default false).',
+        },
+      },
+      required: [],
+    },
+  },
+  {
+    name: 'ark_run_copilot',
+    description:
+      'Execute an MAA Copilot battle plan JSON (or simplified JSON) during battle. '
+      + 'Monitors DP (costs), triggers Deploy, SpeedUp, Skill, Retreat in sequence, and checks battle outcome (victory / defeat).',
+    tags: ['act'],
+    parameters: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        plan: {
+          type: 'object',
+          description: 'The Copilot plan object containing stage_name and actions array (Deploy, SpeedUp, Skill, Retreat).',
+        },
+        maxSeconds: {
+          type: 'number',
+          description: 'Maximum battle timeout in seconds (default 180, clamp 10-600).',
+        },
+      },
+      required: ['plan'],
+    },
+  },
+  {
+    name: 'ark_fetch_copilot',
+    description:
+      'Fetch preset or local Copilot battle plans for a stage code (e.g. "2-10", "1-7"). '
+      + 'If currentTeam is provided, checks for missing operators and provides team building recommendations.',
+    tags: ['read'],
+    parameters: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        stage: {
+          type: 'string',
+          description: 'Stage code (e.g. "2-10", "1-7", "0-1").',
+        },
+        currentTeam: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Optional list of operator names currently in your team, used to compare against the plan requirements.',
+        },
+      },
+      required: ['stage'],
+    },
+  },
 ];
 
 const fail = (text: string): ToolOutcome => ({ text, failed: true });
@@ -334,12 +406,274 @@ export class ArknightsWorld implements World {
           return { ...decl, handler: (args) => this.clickAt(args) };
         case 'ark_swipe':
           return { ...decl, handler: (args) => this.swipeTo(args) };
+        case 'ark_find_operators':
+          return { ...decl, handler: (args) => this.findOperators(args) };
         case 'ark_ocr':
           return { ...decl, handler: (args) => this.readAll(args) };
         default:
           return { ...decl, handler: async () => fail(`未实现的工具：${decl.name}`) };
       }
     });
+  }
+
+  /** 识别当前画面（编队页/干员选择页）中的干员 */
+  private async findOperators(args: Record<string, unknown>): Promise<ToolOutcome | string> {
+    if (!this.session.connected) return fail('识别干员失败：还没连接游戏窗口，先调用 ark_connect。');
+    const targetName = typeof args.name === 'string' ? args.name.trim() : '';
+    const shouldScroll = args.scroll === true;
+
+    let shot = await this.session.screencap();
+    if (!shot.ok) return fail(`识别干员失败（抓帧失败）：${shot.error}`);
+    let currentPng = shot.png;
+    let ocr = await this.session.recognizeFrame(currentPng, this.opts.cfg.resourceDir);
+    if (!ocr.ok) return fail(`识别干员失败（OCR失败）：${ocr.error}`);
+
+    if (targetName) {
+      let found = findOperatorByName(ocr.lines, targetName);
+      let scrolled = 0;
+      while (!found && shouldScroll && scrolled < 4) {
+        await this.session.swipe(0.8, 0.5, 0.25, 0.5, 400);
+        await new Promise((r) => setTimeout(r, 600));
+        scrolled++;
+        shot = await this.session.screencap();
+        if (!shot.ok) break;
+        currentPng = shot.png;
+        ocr = await this.session.recognizeFrame(currentPng, this.opts.cfg.resourceDir);
+        if (!ocr.ok) break;
+        found = findOperatorByName(ocr.lines, targetName);
+      }
+
+      if (found) {
+        return {
+          text: `已找到干员【${found.name}】，中心归一化坐标 (${found.center.x}, ${found.center.y})。${scrolled > 0 ? `（翻页 ${scrolled} 次）` : ''}可以直接调用 ark_click 进行点选。`,
+          blobs: [frameBlob(currentPng, found.name)],
+        };
+      }
+      return {
+        text: `在当前画面${scrolled > 0 ? `及翻页 ${scrolled} 次后` : ''}未找到干员【${targetName}】。`,
+        blobs: [frameBlob(currentPng, '未找到干员')],
+      };
+    }
+
+    const list = parseVisibleOperators(ocr.lines);
+    if (list.length === 0) {
+      return {
+        text: '当前画面未检测到任何已知干员，请确认是否处于编队界面或干员选择名册。',
+        blobs: [frameBlob(currentPng, '干员识别结果')],
+      };
+    }
+
+    const details = list.map((o) => `- ${o.name}：坐标 (${o.center.x}, ${o.center.y})`).join('\n');
+    return {
+      text: `当前画面检测到 ${list.length} 位干员：\n${details}`,
+      blobs: [frameBlob(currentPng, '干员识别结果')],
+    };
+  }
+
+  /** 检索关卡 Copilot 作业并对比当前队伍 */
+  private async fetchCopilotTool(args: Record<string, unknown>): Promise<ToolOutcome | string> {
+    const stage = typeof args.stage === 'string' ? args.stage.trim() : '';
+    if (!stage) return fail('检索作业失败：缺少 stage 参数（如 "2-10"）。');
+
+    const plan = fetchCopilotPlan(stage, this.opts.cfg.resourceDir);
+    if (!plan) {
+      return `未找到关卡【${stage}】的预置或本地作业。你可以让大模型根据战场自主编排 Copilot JSON 计划执行。`;
+    }
+
+    const currentTeam = Array.isArray(args.currentTeam)
+      ? (args.currentTeam.filter((s) => typeof s === 'string') as string[])
+      : [];
+
+    let teamAnalysis = '';
+    if (currentTeam.length > 0) {
+      const cmp = compareFormation(plan, currentTeam);
+      teamAnalysis = `\n\n【编队匹配分析】\n- 匹配干员：${cmp.matched.length > 0 ? cmp.matched.join('、') : '无'}\n- 缺少干员：${cmp.missing.length > 0 ? cmp.missing.join('、') : '无'}\n- 建议：${cmp.notes}`;
+    }
+
+    return `已成功获取关卡【${stage}】的 Copilot 作业：\n标题：${plan.doc?.title || stage}\n详情：${plan.doc?.details || '标准作业'}\n包含动作数：${plan.actions.length} 步${teamAnalysis}\n\n作业 JSON 内容：\n`
+      + '```json\n' + JSON.stringify(plan, null, 2) + '\n```\n可直接将此 JSON 传给 ark_run_copilot 执行。';
+  }
+
+  /** 执行 Copilot 作业 */
+  private async runCopilot(args: Record<string, unknown>): Promise<ToolOutcome | string> {
+    if (!this.session.connected) return fail('执行作业失败：还没连接游戏窗口，先调用 ark_connect。');
+    const size = this.session.resolution;
+    if (!size) return fail('执行作业失败：还没拿到画面尺寸，先调用 ark_screencap 取一帧。');
+
+    const parsed = parseCopilotPlan(args.plan);
+    if (!parsed.ok) return fail(parsed.error);
+    const plan = parsed.plan;
+
+    const maxSeconds = typeof args.maxSeconds === 'number' && Number.isFinite(args.maxSeconds)
+      ? Math.max(10, Math.min(600, Math.round(args.maxSeconds)))
+      : 180;
+
+    const dimension = getStageDimension(plan.stage_name, this.opts.cfg.resourceDir);
+    const logs: string[] = [];
+    const startTime = Date.now();
+
+    logs.push(`开始执行关卡【${plan.stage_name}】Copilot 作业，共 ${plan.actions.length} 步动作。`);
+
+    let finalShot: Uint8Array | null = null;
+    let battleFinished = false;
+    let battleResultText = '战斗仍在进行或已超时';
+
+    for (let i = 0; i < plan.actions.length; i++) {
+      if (Date.now() - startTime > maxSeconds * 1000) {
+        logs.push(`达到最大超时限制（${maxSeconds}秒），停止后续动作。`);
+        break;
+      }
+
+      const act = plan.actions[i]!;
+      const actType = act.type;
+
+      // 检查战斗是否提前结束
+      const shot = await this.session.screencap();
+      if (shot.ok) {
+        finalShot = shot.png;
+        const ocr = await this.session.recognizeFrame(shot.png, this.opts.cfg.resourceDir);
+        if (ocr.ok) {
+          const state = parseBattleState(ocr.lines);
+          if (state.result === 'victory') {
+            logs.push('检测到【作战胜利】（行动结束）！');
+            battleFinished = true;
+            battleResultText = '作战胜利（行动结束）';
+            break;
+          }
+          if (state.result === 'defeat') {
+            logs.push('检测到【作战失败】！');
+            battleFinished = true;
+            battleResultText = '作战失败';
+            break;
+          }
+        }
+      }
+
+      // 等待费用满足
+      if (typeof act.costs === 'number' && act.costs > 0) {
+        let waitCount = 0;
+        while (waitCount < 20) {
+          const s = await this.session.screencap();
+          if (s.ok) {
+            finalShot = s.png;
+            const ocr = await this.session.recognizeFrame(s.png, this.opts.cfg.resourceDir);
+            if (ocr.ok) {
+              const state = parseBattleState(ocr.lines);
+              if (state.result) {
+                battleFinished = true;
+                battleResultText = state.result === 'victory' ? '作战胜利（行动结束）' : '作战失败';
+                break;
+              }
+              if (state.cost !== null && state.cost >= act.costs) {
+                break;
+              }
+            }
+          }
+          await new Promise((r) => setTimeout(r, 1000));
+          waitCount++;
+        }
+        if (battleFinished) break;
+      }
+
+      // 执行动作
+      if (actType === 'SpeedUp' || actType === '二倍速') {
+        // 2倍速按钮位置 (0.938, 0.052)
+        const px = Math.round(0.938 * size[0]);
+        const py = Math.round(0.052 * size[1]);
+        await this.session.click(px, py);
+        logs.push(`第 ${i + 1} 步：点击二倍速加速。`);
+      } else if (actType === 'Deploy' || actType === '部署') {
+        const tile = resolveActionTile(act, dimension);
+        if (!tile) {
+          logs.push(`第 ${i + 1} 步（部署 ${act.name || ''}）：缺少目标地块位置，已跳过。`);
+          continue;
+        }
+
+        // 手牌区默认中右部 (x ≈ 0.82, y ≈ 0.88)
+        const cardNorm = { x: 0.82, y: 0.88 };
+        const dir = (act.direction?.toLowerCase() || 'right') as 'up' | 'down' | 'left' | 'right';
+        const planned = planDeploy(cardNorm, tile, dir, size, {
+          holdMs: this.opts.cfg.deployHoldMs,
+          gapMs: this.opts.cfg.deployGapMs,
+          directionMs: this.opts.cfg.deployDirectionMs,
+        });
+
+        if (planned.ok) {
+          const { plan: dp } = planned;
+          await this.session.swipe(dp.card.x, dp.card.y, dp.tile.x, dp.tile.y, dp.holdMs);
+          if (dp.gapMs > 0) await new Promise((r) => setTimeout(r, dp.gapMs));
+          await this.session.swipe(dp.tile.x, dp.tile.y, dp.release.x, dp.release.y, dp.directionMs);
+          logs.push(`第 ${i + 1} 步：部署【${act.name || '干员'}】到地块 (${tile.x}, ${tile.y}) 朝向 ${dir}。`);
+        } else {
+          logs.push(`第 ${i + 1} 步：部署规划失败（${planned.error}）。`);
+        }
+      } else if (actType === 'Skill' || actType === '技能') {
+        const tile = resolveActionTile(act, dimension);
+        if (tile) {
+          const px = Math.round(tile.x * size[0]);
+          const py = Math.round(tile.y * size[1]);
+          await this.session.click(px, py);
+          await new Promise((r) => setTimeout(r, 200));
+          // 点击技能按钮（干员头顶稍上方）
+          await this.session.click(px, Math.max(0, py - 60));
+          logs.push(`第 ${i + 1} 步：激活干员【${act.name || ''}】技能。`);
+        }
+      } else if (actType === 'Retreat' || actType === '撤退') {
+        const tile = resolveActionTile(act, dimension);
+        if (tile) {
+          const px = Math.round(tile.x * size[0]);
+          const py = Math.round(tile.y * size[1]);
+          await this.session.click(px, py);
+          await new Promise((r) => setTimeout(r, 200));
+          // 点击撤退图标（左上方）
+          await this.session.click(Math.max(0, px - 60), Math.max(0, py - 60));
+          logs.push(`第 ${i + 1} 步：撤退干员【${act.name || ''}】。`);
+        }
+      }
+
+      if (act.delay && act.delay > 0) {
+        await new Promise((r) => setTimeout(r, Math.min(10000, act.delay!)));
+      }
+    }
+
+    // 后续轮询直到战斗结束或超时
+    if (!battleFinished) {
+      logs.push('所有预定部署动作已下发，等待战斗自动进行至结算...');
+      let pollCount = 0;
+      while (pollCount < 30 && Date.now() - startTime < maxSeconds * 1000) {
+        await new Promise((r) => setTimeout(r, 3000));
+        pollCount++;
+        const s = await this.session.screencap();
+        if (s.ok) {
+          finalShot = s.png;
+          const ocr = await this.session.recognizeFrame(s.png, this.opts.cfg.resourceDir);
+          if (ocr.ok) {
+            const state = parseBattleState(ocr.lines);
+            if (state.result === 'victory') {
+              battleResultText = '作战胜利（行动结束）';
+              battleFinished = true;
+              break;
+            }
+            if (state.result === 'defeat') {
+              battleResultText = '作战失败';
+              battleFinished = true;
+              break;
+            }
+          }
+        }
+      }
+    }
+
+    const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+    const reportText = `Copilot 作业执行汇报：\n- 战果状态：${battleResultText}\n- 执行用时：${elapsed} 秒\n- 执行日志：\n${logs.map((l) => '  * ' + l).join('\n')}`;
+
+    if (finalShot) {
+      return {
+        text: reportText,
+        blobs: [frameBlob(finalShot, '战斗最终画面')],
+      };
+    }
+    return reportText;
   }
 
   webUi(_language?: Language): WorldWebUiDecl {

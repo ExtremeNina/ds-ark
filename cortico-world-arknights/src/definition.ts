@@ -59,13 +59,25 @@ export const ARKNIGHTS: WorldDefinition<ArknightsConfigSection> = {
         zh: '抓帧并列出画面里所有识别到的文字与归一化坐标，用来定位按钮；只读，不点击。',
         en: 'Captures the frame and lists every recognised text line with normalised boxes; read-only.',
       },
+      ark_find_operators: {
+        zh: '识别当前画面（编队界面或干员选择名册）中的干员卡片，返回干员名与坐标；支持按名字检索。',
+        en: 'Recognises operator cards on screen (formation or roster) and returns names with coordinates; supports searching by name.',
+      },
+      ark_run_copilot: {
+        zh: '执行一份 MAA Copilot 战斗作业 JSON（含下干员、开技能、撤退、2倍速等动作），自动监控费用并汇报执行进度与战果。',
+        en: 'Executes an MAA Copilot battle plan JSON (deploy, skill, retreat, 2x speed), monitoring DP and reporting battle outcome.',
+      },
+      ark_fetch_copilot: {
+        zh: '检索指定关卡的内置或本地 Copilot 战斗作业；若提供当前编队干员，会自动比对缺漏并给出建议。',
+        en: 'Fetches built-in or local Copilot battle plans for a stage, optionally comparing against current team operators.',
+      },
     }),
     events: [
       {
         type: 'arknights.ready',
         description: {
-          zh: 'World 挂载完成，十一个工具可用；此时尚未连接游戏窗口。',
-          en: 'The World was mounted and its eleven tools are available; the game window is not connected yet.',
+          zh: 'World 挂载完成，十四个工具可用；此时尚未连接游戏窗口。',
+          en: 'The World was mounted and its fourteen tools are available; the game window is not connected yet.',
         },
       },
     ],
