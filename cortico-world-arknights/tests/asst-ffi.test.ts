@@ -24,6 +24,11 @@ describe('Asst FFI 原生加载器', () => {
 
     const handle = lib.create();
     expect(handle).not.toBeNull();
+
+    // 5 参数安全挂载：即使窗口不存在也不会段错误闪退
+    const attached = lib.attachWindow(handle, '0x12345');
+    expect(attached).toBe(false);
+
     lib.destroy(handle);
   });
 });

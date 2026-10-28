@@ -113,8 +113,12 @@ export async function runMaaCoreCopilot(options: MaaCoreCopilotOptions): Promise
         const hwndVal = typeof hwnd === 'bigint' ? hwnd : BigInt(hwnd);
         const attached = lib.attachWindow(handle, hwndVal);
         logs.push(`挂载明日方舟窗口句柄 (${String(hwnd)})：${attached ? '成功' : '失败'}`);
+        if (!attached) {
+          throw new Error(`AsstAttachWindow 挂载窗口失败（句柄: ${String(hwnd)}）`);
+        }
       } catch (e) {
         logs.push(`挂载窗口句柄异常：${String(e)}`);
+        throw e;
       }
     }
 

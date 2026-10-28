@@ -14,7 +14,13 @@ export interface MaaCoreLib {
   destroy(handle: unknown): void;
   loadResource(dir: string): boolean;
   setUserDir(userDir: string): boolean;
-  attachWindow(handle: unknown, hwnd: bigint | number): boolean;
+  attachWindow(
+    handle: unknown,
+    hwnd: bigint | number | string,
+    screencap?: bigint | number,
+    mouse?: bigint | number,
+    keyboard?: bigint | number,
+  ): boolean;
   connect(handle: unknown, adbPath: string, address: string, config?: string): boolean;
   connected(handle: unknown): boolean;
   appendTask(handle: unknown, taskType: string, params: Record<string, unknown> | string): number;
@@ -89,7 +95,7 @@ export function loadMaaCoreLib(maaDirInput?: string): MaaCoreLib | null {
     const AsstCallback = koffi.proto('void AsstCallback(int msg, const char *details, void *arg)');
     const AsstCreateEx = lib.func('void* AsstCreateEx(AsstCallback *callback, void *arg)');
     const AsstDestroy = lib.func('void AsstDestroy(void *handle)');
-    const AsstAttachWindow = lib.func('bool AsstAttachWindow(void *handle, void *hwnd)');
+    const AsstAttachWindow = lib.func('bool AsstAttachWindow(void *handle, void *hwnd, uint64_t screencap, uint64_t mouse, uint64_t keyboard)');
     const AsstConnect = lib.func('bool AsstConnect(void *handle, const char *adb_path, const char *address, const char *config)');
     const AsstConnected = lib.func('bool AsstConnected(void *handle)');
     const AsstAppendTask = lib.func('int AsstAppendTask(void *handle, const char *type, const char *params)');
@@ -127,10 +133,14 @@ export function loadMaaCoreLib(maaDirInput?: string): MaaCoreLib | null {
       setUserDir(userDir) {
         return AsstSetUserDir(userDir);
       },
-      attachWindow(handle, hwnd) {
+      attachWindow(handle, hwnd, screencap = 18n, mouse = 2n, keyboard = 2n) {
         if (!handle) return false;
         try {
-          return AsstAttachWindow(handle, typeof hwnd === 'bigint' ? hwnd : BigInt(hwnd));
+          const hwndPtr = typeof hwnd === 'bigint' ? hwnd : BigInt(hwnd);
+          const sc = typeof screencap === 'bigint' ? screencap : BigInt(screencap);
+          const ms = typeof mouse === 'bigint' ? mouse : BigInt(mouse);
+          const kb = typeof keyboard === 'bigint' ? keyboard : BigInt(keyboard);
+          return Boolean(AsstAttachWindow(handle, hwndPtr, sc, ms, kb));
         } catch {
           return false;
         }
