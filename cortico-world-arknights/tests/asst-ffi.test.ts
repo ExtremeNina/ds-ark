@@ -14,7 +14,7 @@ describe('Asst FFI 原生加载器', () => {
     expect(findMaaCoreDir('C:/NonExistentPath_Maa_12345')).toBeNull();
   });
 
-  it('loadMaaCoreLib 真实加载 MaaCore.dll 获取版本与生命周期', () => {
+  it('loadMaaCoreLib 真实加载 MaaCore.dll 获取版本与生命周期', async () => {
     const lib = loadMaaCoreLib('D:/soft/MAA-v6');
     if (!lib) {
       // 机器未安装时跳过
@@ -29,6 +29,21 @@ describe('Asst FFI 原生加载器', () => {
     const attached = lib.attachWindow(handle, '0x12345');
     expect(attached).toBe(false);
 
-    lib.destroy(handle);
+    await lib.destroy(handle);
+  });
+
+  it('loadMaaCoreLib 支持回调与安全异步析构（无死锁）', async () => {
+    const lib = loadMaaCoreLib('D:/soft/MAA-v6');
+    if (!lib) return;
+
+    let callbackFired = false;
+    const handle = lib.create((msg, details) => {
+      callbackFired = true;
+    });
+    expect(handle).not.toBeNull();
+
+    // 销毁时 C++ 发送消息，异步析构不产生主线程死锁
+    await lib.destroy(handle);
+    expect(callbackFired).toBe(true);
   });
 });

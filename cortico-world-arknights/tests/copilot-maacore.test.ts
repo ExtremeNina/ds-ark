@@ -38,7 +38,7 @@ function createMockMaaLib(succeeds = true): { lib: MaaCoreLib; appendSpy: any; s
       callbackRef = cb;
       return 12345n;
     }),
-    destroy: vi.fn(),
+    destroy: vi.fn().mockResolvedValue(undefined),
     loadResource: vi.fn().mockReturnValue(true),
     setUserDir: vi.fn().mockReturnValue(true),
     attachWindow: vi.fn().mockReturnValue(true),

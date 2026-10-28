@@ -154,7 +154,7 @@ export async function runMaaCoreCopilot(options: MaaCoreCopilotOptions): Promise
     logs.push(`MaaCore 运行发生异常：${String(error)}`);
     try { lib.stop(handle); } catch {}
   } finally {
-    try { lib.destroy(handle); } catch {}
+    try { await lib.destroy(handle); } catch {}
     try {
       if (existsSync(tempFile)) unlinkSync(tempFile);
     } catch {}

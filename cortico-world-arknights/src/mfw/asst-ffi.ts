@@ -11,7 +11,7 @@ export type AsstMsgCallback = (msg: number, details: string) => void;
 export interface MaaCoreLib {
   readonly version: string;
   create(callback?: AsstMsgCallback): unknown;
-  destroy(handle: unknown): void;
+  destroy(handle: unknown): Promise<void>;
   loadResource(dir: string): boolean;
   setUserDir(userDir: string): boolean;
   attachWindow(
@@ -108,6 +108,8 @@ export function loadMaaCoreLib(maaDirInput?: string): MaaCoreLib | null {
     // 全局预加载主资源
     AsstLoadResource(maaDir);
 
+    const registeredCallbacks = new Map<unknown, any>();
+
     const maaCore: MaaCoreLib = {
       version,
       create(callback) {
@@ -120,12 +122,36 @@ export function loadMaaCoreLib(maaDirInput?: string): MaaCoreLib | null {
             }
           }, koffi.pointer(AsstCallback));
           const handle = AsstCreateEx(registered, null);
+          if (handle) {
+            registeredCallbacks.set(handle, registered);
+          } else {
+            try { koffi.unregister(registered); } catch {}
+          }
           return handle;
         }
         return AsstCreate();
       },
-      destroy(handle) {
-        if (handle) AsstDestroy(handle);
+      async destroy(handle) {
+        if (!handle) return;
+        const reg = registeredCallbacks.get(handle);
+        try {
+          // 异步化调用 AsstDestroy，避免 C++ 析构清理线程派发回调时与 Node.js 同步主线程死锁
+          const destroyPromise = new Promise<void>((resolve, reject) => {
+            AsstDestroy.async(handle, (err: unknown) => {
+              if (err) reject(err);
+              else resolve();
+            });
+          });
+          const timeoutPromise = new Promise<void>((resolve) => setTimeout(resolve, 3000));
+          await Promise.race([destroyPromise, timeoutPromise]);
+        } catch {
+          // 忽略析构异常
+        } finally {
+          if (reg) {
+            try { koffi.unregister(reg); } catch {}
+            registeredCallbacks.delete(handle);
+          }
+        }
       },
       loadResource(dir) {
         return AsstLoadResource(dir);
