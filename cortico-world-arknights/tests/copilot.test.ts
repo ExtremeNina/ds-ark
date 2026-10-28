@@ -1,6 +1,6 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { normalizeDirection, parseCopilotPlan, resolveActionTile, resolveHandCardPosition } from '../src/battle/copilot.ts';
-import { compareFormation, fetchCopilotPlan } from '../src/battle/copilot-fetch.ts';
+import { compareFormation, fetchCopilotPlan, fetchOnlineCopilot } from '../src/battle/copilot-fetch.ts';
 
 describe('copilot 计划解析与校验', () => {
   it('正确解析标准的 Copilot JSON', () => {
@@ -44,19 +44,19 @@ describe('copilot 计划解析与校验', () => {
 });
 
 describe('copilot-fetch 抄作业与编队比对', () => {
-  it('能正确获取内置 2-10 和 1-7 作业', () => {
-    const plan210 = fetchCopilotPlan('2-10');
+  it('能正确获取内置 2-10 和 1-7 作业', async () => {
+    const plan210 = await fetchCopilotPlan('2-10');
     expect(plan210).not.toBeNull();
     expect(plan210?.stage_name).toBe('2-10');
     expect(plan210?.actions.length).toBeGreaterThan(0);
 
-    const plan17 = fetchCopilotPlan('1-7');
+    const plan17 = await fetchCopilotPlan('1-7');
     expect(plan17).not.toBeNull();
     expect(plan17?.stage_name).toBe('1-7');
   });
 
-  it('比对队伍包含全部所需干员时，允许直接执行', () => {
-    const plan = fetchCopilotPlan('1-7')!;
+  it('比对队伍包含全部所需干员时，允许直接执行', async () => {
+    const plan = (await fetchCopilotPlan('1-7'))!;
     const team = ['芬', '克洛丝', '阿米娅', '安洁莉娜'];
     const cmp = compareFormation(plan, team);
 
@@ -66,14 +66,57 @@ describe('copilot-fetch 抄作业与编队比对', () => {
     expect(cmp.matched).toContain('克洛丝');
   });
 
-  it('比对队伍缺少干员时，明确指出缺漏并建议询问用户', () => {
-    const plan = fetchCopilotPlan('2-10')!;
+  it('比对队伍缺少干员时，明确指出缺漏并建议询问用户', async () => {
+    const plan = (await fetchCopilotPlan('2-10'))!;
     const team = ['安洁莉娜', '阿米娅']; // 缺少 芬、香草、米格鲁、克洛丝
     const cmp = compareFormation(plan, team);
 
     expect(cmp.canExecuteDirectly).toBe(false);
     expect(cmp.missing).toContain('芬');
     expect(cmp.notes).toContain('请向用户询问');
+  });
+
+  it('fetchOnlineCopilot 成功对接作业站返回并校验计划', async () => {
+    const mockPlan = {
+      stage_name: '3-8',
+      actions: [{ type: 'SpeedUp' }, { type: 'Deploy', name: '芬', location: [3, 3] }],
+    };
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn().mockImplementation(async (url: string) => {
+      if (url.includes('/copilot/query')) {
+        return {
+          ok: true,
+          json: async () => ({ data: [{ id: 9999, title: '3-8 作业' }] }),
+        } as unknown as Response;
+      }
+      if (url.includes('/copilot/get/9999')) {
+        return {
+          ok: true,
+          json: async () => ({ data: { content: JSON.stringify(mockPlan) } }),
+        } as unknown as Response;
+      }
+      return { ok: false } as unknown as Response;
+    });
+
+    try {
+      const plan = await fetchOnlineCopilot('3-8', 'https://mock.prts.plus');
+      expect(plan).not.toBeNull();
+      expect(plan?.stage_name).toBe('3-8');
+      expect(plan?.actions.length).toBe(2);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('fetchOnlineCopilot 当网络超时或异常时静默降级为 null', async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn().mockRejectedValue(new Error('Network error'));
+    try {
+      const plan = await fetchOnlineCopilot('3-8');
+      expect(plan).toBeNull();
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
   });
 
   describe('resolveHandCardPosition 手牌动态卡槽定位', () => {

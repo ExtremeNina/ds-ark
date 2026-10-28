@@ -6,7 +6,59 @@
  */
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import type { CopilotPlan } from './copilot.ts';
+import { parseCopilotPlan, type CopilotPlan } from './copilot.ts';
+
+const DEFAULT_ONLINE_COPILOT_API = 'https://prts.maa.plus';
+
+/** 从 MAA 在线作业站 (PRTS Plus) 检索并拉取指定关卡的作业 */
+export async function fetchOnlineCopilot(
+  stageCode: string,
+  apiBase = DEFAULT_ONLINE_COPILOT_API,
+): Promise<CopilotPlan | null> {
+  const code = stageCode.trim();
+  if (!code) return null;
+
+  try {
+    const queryUrl = `${apiBase.replace(/\/+$/, '')}/copilot/query?page=1&limit=3&levelKeyword=${encodeURIComponent(code)}`;
+    const queryRes = await fetch(queryUrl, {
+      signal: AbortSignal.timeout(5000),
+      headers: { Accept: 'application/json' },
+    });
+    if (!queryRes.ok) return null;
+
+    const listData = (await queryRes.json()) as { data?: Array<{ id: number | string; title?: string }> };
+    const items = Array.isArray(listData?.data) ? listData.data : [];
+    if (items.length === 0 || !items[0]?.id) return null;
+
+    const targetId = items[0].id;
+    const detailUrl = `${apiBase.replace(/\/+$/, '')}/copilot/get/${targetId}`;
+    const detailRes = await fetch(detailUrl, {
+      signal: AbortSignal.timeout(5000),
+      headers: { Accept: 'application/json' },
+    });
+    if (!detailRes.ok) return null;
+
+    const detailData = (await detailRes.json()) as { data?: { content?: unknown } | unknown; content?: unknown };
+    const rawContent = (detailData as any)?.data?.content ?? (detailData as any)?.content ?? detailData;
+    let planObj = rawContent;
+    if (typeof rawContent === 'string') {
+      try {
+        planObj = JSON.parse(rawContent);
+      } catch {
+        return null;
+      }
+    }
+
+    const verified = parseCopilotPlan(planObj);
+    if (verified.ok) {
+      return verified.plan;
+    }
+  } catch {
+    // 网络受限或 API 异常时静默降级到本地
+  }
+
+  return null;
+}
 
 /** 内置常见关卡保底低配作业（3星/基础干员） */
 export const PRESET_COPILOT_PLANS: Record<string, CopilotPlan> = {
@@ -67,7 +119,17 @@ export const PRESET_COPILOT_PLANS: Record<string, CopilotPlan> = {
 /**
  * 检索指定关卡的 Copilot 作业
  */
-export function fetchCopilotPlan(stageCode: string, resourceDir?: string): CopilotPlan | null {
+/**
+ * 检索指定关卡的 Copilot 作业：
+ * 1. 优先查本地内置预制（0-1、1-7、2-10 等常用关）
+ * 2. 查本地 MAA 资源目录
+ * 3. 查 MAA Copilot 线上作业站 (prts.maa.plus)
+ */
+export async function fetchCopilotPlan(
+  stageCode: string,
+  resourceDir?: string,
+  onlineApiUrl?: string,
+): Promise<CopilotPlan | null> {
   const code = stageCode.trim().toUpperCase();
 
   // 1. 优先查内置预制
@@ -85,6 +147,10 @@ export function fetchCopilotPlan(stageCode: string, resourceDir?: string): Copil
       if (match) return match;
     }
   }
+
+  // 3. 尝试从线上 MAA 作业站拉取
+  const online = await fetchOnlineCopilot(code, onlineApiUrl);
+  if (online) return online;
 
   return null;
 }

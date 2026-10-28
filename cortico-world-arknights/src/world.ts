@@ -479,7 +479,7 @@ export class ArknightsWorld implements World {
     const stage = typeof args.stage === 'string' ? args.stage.trim() : '';
     if (!stage) return fail('检索作业失败：缺少 stage 参数（如 "2-10"）。');
 
-    const plan = fetchCopilotPlan(stage, this.opts.cfg.resourceDir);
+    const plan = await fetchCopilotPlan(stage, this.opts.cfg.resourceDir);
     if (!plan) {
       return `未找到关卡【${stage}】的预置或本地作业。你可以让大模型根据战场自主编排 Copilot JSON 计划执行。`;
     }
