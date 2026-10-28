@@ -99,6 +99,10 @@ export class ArknightsSession {
     return this.win;
   }
 
+  get runtimeInstance(): ArknightsRuntime | null {
+    return this.runtime;
+  }
+
   /**
    * 画面尺寸；连接成功但还没抓到帧时为 `null`，调用方不得拿它当已知值用。
    * 有帧以后一律用帧的真实像素尺寸：控制器报的尺寸与实际画面可能不是同一个坐标系。

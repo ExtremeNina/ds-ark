@@ -47,6 +47,10 @@ export class ArknightsRuntime {
     return this.tasker;
   }
 
+  get resourceInstance(): MaaResourceLike | null {
+    return this.resource;
+  }
+
   get ocrReady(): boolean {
     return this.ocrLoaded && this.tasker !== null;
   }
