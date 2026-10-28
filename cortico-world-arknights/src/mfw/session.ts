@@ -293,12 +293,29 @@ export class ArknightsSession {
     }
   }
 
-  async click(x: number, y: number): Promise<ActionResult> {
+  async click(x: number, y: number, options?: { readonly double?: boolean; readonly holdMs?: number }): Promise<ActionResult> {
     const ctrl = this.ctrl;
     if (!ctrl || !this.connected) {
       return { ok: false, error: '点击失败：还没连接游戏窗口，先调用 ark_connect。' };
     }
     try {
+      if (options?.double) {
+        const first = await withTimeout(Promise.resolve(ctrl.post_click(x, y).wait()), CLICK_TIMEOUT_MS, '点击');
+        if (!first.succeeded) return { ok: false, error: `点击失败：控制器返回失败（状态码 ${String(first.status)}）。` };
+        await new Promise((resolve) => setTimeout(resolve, 80));
+        const second = await withTimeout(Promise.resolve(ctrl.post_click(x, y).wait()), CLICK_TIMEOUT_MS, '连点');
+        if (!second.succeeded) return { ok: false, error: `连点失败：第二次点击返回失败（状态码 ${String(second.status)}）。` };
+        return { ok: true };
+      }
+      if (options?.holdMs && options.holdMs > 0 && typeof ctrl.post_swipe === 'function') {
+        const job = await withTimeout(
+          Promise.resolve(ctrl.post_swipe(x, y, x, y, options.holdMs).wait()),
+          CLICK_TIMEOUT_MS + options.holdMs,
+          '长按',
+        );
+        if (!job.succeeded) return { ok: false, error: `点击失败：控制器返回失败（状态码 ${String(job.status)}）。` };
+        return { ok: true };
+      }
       const job = await withTimeout(Promise.resolve(ctrl.post_click(x, y).wait()), CLICK_TIMEOUT_MS, '点击');
       if (!job.succeeded) return { ok: false, error: `点击失败：控制器返回失败（状态码 ${String(job.status)}）。` };
       return { ok: true };

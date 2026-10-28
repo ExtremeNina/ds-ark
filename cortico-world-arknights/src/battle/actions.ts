@@ -13,6 +13,13 @@ export interface ActionPoint {
 
 export interface ClickPlan {
   readonly at: ActionPoint;
+  readonly double?: boolean;
+  readonly holdMs?: number;
+}
+
+export interface ClickOptions {
+  readonly double?: unknown;
+  readonly holdMs?: unknown;
 }
 
 export type ClickResult =
@@ -46,6 +53,7 @@ const DEFAULT_DURATION_MS = 300;
 const MAX_REPEATS = 5;
 const DEFAULT_INTERVAL_MS = 120;
 const MAX_INTERVAL_MS = 1000;
+const MAX_HOLD_MS = 3000;
 
 function isUsableSize(size: readonly [number, number]): boolean {
   const [width, height] = size;
@@ -64,8 +72,8 @@ function pointOf(value: unknown): ActionPoint | null {
   return unitX === null || unitY === null ? null : { x: unitX, y: unitY };
 }
 
-/** 点一下：越界、非数字、尺寸未知都在发手势之前拒绝。 */
-export function planClick(point: unknown, size: readonly [number, number]): ClickResult {
+/** 点一下：越界、非数字、尺寸未知都在发手势之前拒绝。支持可选的双击与长按。 */
+export function planClick(point: unknown, size: readonly [number, number], options?: ClickOptions): ClickResult {
   if (!isUsableSize(size)) {
     return { ok: false, error: '点击失败：还不知道画面尺寸，先调用 ark_screencap 取一帧。' };
   }
@@ -73,7 +81,18 @@ export function planClick(point: unknown, size: readonly [number, number]): Clic
   if (!unit) {
     return { ok: false, error: '点击失败：x / y 必须是 0~1 的归一化坐标，从附件画面里量。' };
   }
-  return { ok: true, plan: { at: toPoint(unit, size) } };
+  const isDouble = options?.double === true;
+  const rawHold = typeof options?.holdMs === 'number' && Number.isFinite(options.holdMs) ? Math.round(options.holdMs) : undefined;
+  const holdMs = rawHold !== undefined && rawHold > 0 ? Math.min(MAX_HOLD_MS, Math.max(0, rawHold)) : undefined;
+
+  return {
+    ok: true,
+    plan: {
+      at: toPoint(unit, size),
+      ...(isDouble ? { double: true } : {}),
+      ...(holdMs !== undefined ? { holdMs } : {}),
+    },
+  };
 }
 
 /** 拖一下：用于滚动列表、切章节、拖动滑块。零长度会被当成点击，直接拒绝。 */

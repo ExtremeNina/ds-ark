@@ -33,6 +33,17 @@ describe('通用点击', () => {
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error).toContain('画面尺寸');
   });
+
+  it('支持连点 double 与长按 holdMs 参数', () => {
+    const doubleClick = planClick({ x: 0.5, y: 0.5 }, SIZE, { double: true });
+    expect(doubleClick).toEqual({ ok: true, plan: { at: { x: 640, y: 360 }, double: true } });
+
+    const holdClick = planClick({ x: 0.5, y: 0.5 }, SIZE, { holdMs: 150 });
+    expect(holdClick).toEqual({ ok: true, plan: { at: { x: 640, y: 360 }, holdMs: 150 } });
+
+    const clampedHold = planClick({ x: 0.5, y: 0.5 }, SIZE, { holdMs: 5000 });
+    expect(clampedHold).toEqual({ ok: true, plan: { at: { x: 640, y: 360 }, holdMs: 3000 } });
+  });
 });
 
 describe('通用拖拽', () => {

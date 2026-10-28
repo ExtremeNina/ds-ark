@@ -206,6 +206,14 @@ export const ARKNIGHTS_TOOL_DECLS: ReadonlyArray<ToolSpec> = [
             + 'frame and reports whether it showed up; it does not infer what the screen means.',
         },
         timeoutMs: { type: 'number', description: 'How long to poll for expect, 500-10000 ms (default 3000).' },
+        double: {
+          type: 'boolean',
+          description: 'Optional: send two rapid clicks (double click) to activate nodes on 3D maps without panning camera.',
+        },
+        holdMs: {
+          type: 'number',
+          description: 'Optional: hold the press down for this duration in milliseconds before releasing (0-3000, default 0).',
+        },
       },
       required: ['x', 'y'],
     },
@@ -680,16 +688,17 @@ export class ArknightsWorld implements World {
     const size = this.session.resolution;
     if (!size) return fail('点击失败：还没拿到画面尺寸，先调用 ark_screencap 取一帧。');
 
-    const planned = planClick({ x: args.x, y: args.y }, size);
+    const planned = planClick({ x: args.x, y: args.y }, size, { double: args.double, holdMs: args.holdMs });
     if (!planned.ok) return fail(planned.error);
-    const { at } = planned.plan;
+    const { at, double, holdMs } = planned.plan;
 
-    const clicked = await this.session.click(at.x, at.y);
+    const clicked = await this.session.click(at.x, at.y, { double, holdMs });
     if (!clicked.ok) return fail(clicked.error);
 
-    const receipt = `已向 (${at.x}, ${at.y}) 发送一次点击（按 ${size[0]}×${size[1]} 换算）。`;
+    const actionDesc = double ? '双击' : holdMs ? `长按（${holdMs}ms）` : '点击';
+    const receipt = `已向 (${at.x}, ${at.y}) 发送一次${actionDesc}（按 ${size[0]}×${size[1]} 换算）。`;
     const expect = typeof args.expect === 'string' ? args.expect.trim() : '';
-    if (!expect) return this.withAfterFrame(receipt, '点击');
+    if (!expect) return this.withAfterFrame(receipt, actionDesc);
     return this.confirmText(receipt, expect, args.timeoutMs);
   }
 
