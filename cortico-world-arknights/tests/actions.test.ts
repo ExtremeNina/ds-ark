@@ -74,14 +74,19 @@ describe('通用拖拽', () => {
     expect(of(99_999)).toBe(2000);
   });
 
-  it('两端重合或几乎重合时拒绝，因为游戏会当成点击', () => {
+  it('完全重合时拒绝；1 像素微拖拽放行（3D 地图上用它当点击）', () => {
     const same = planSwipe({ x: 0.5, y: 0.5 }, { x: 0.5, y: 0.5 }, 300, SIZE);
     expect(same.ok).toBe(false);
     if (!same.ok) expect(same.error).toContain('重合');
 
-    // 0.001 在 1280 宽上约 1.3 像素，仍小于 2 像素阈值
-    const tiny = planSwipe({ x: 0.5, y: 0.5 }, { x: 0.501, y: 0.5 }, 300, SIZE);
-    expect(tiny.ok).toBe(false);
+    // 0.501 在 1280 宽上与 0.5 恰好差 1 像素：这是 3D 地图上「点开关卡牌」的正确手势，
+    // 真机实测 ark_click 会被游戏当镜头微移，微拖拽反而能点开。
+    const micro = planSwipe({ x: 0.5, y: 0.5 }, { x: 0.501, y: 0.5 }, 300, SIZE);
+    expect(micro.ok).toBe(true);
+    if (micro.ok) {
+      expect(micro.plan.from.x).toBe(640);
+      expect(micro.plan.to.x).toBe(641);
+    }
   });
 
   it('坐标非法或尺寸未知时拒绝', () => {

@@ -33,8 +33,13 @@ export type SwipeResult =
   | { readonly ok: true; readonly plan: SwipePlan }
   | { readonly ok: false; readonly error: string };
 
-/** 两端至少要差这么多像素，否则游戏会把整串事件当成一次点击。 */
-const MIN_SWIPE_DISTANCE = 2;
+/**
+ * 两端至少要差这么多像素。
+ *
+ * 阈值是 1 不是 2：3D 章节地图/战场里 `post_click` 会被游戏当成镜头微移，
+ * 1 像素的微拖拽（down → move → up）反而是点开关卡牌的可靠手势，不能拦掉。
+ */
+const MIN_SWIPE_DISTANCE = 1;
 const MIN_DURATION_MS = 80;
 const MAX_DURATION_MS = 2000;
 const DEFAULT_DURATION_MS = 300;
