@@ -100,6 +100,7 @@ class FakeController implements MaaControllerLike {
 /** 假资源：记录试过的路径，可整体失败，用来覆盖「没模型」「加载失败」两条降级路径。 */
 class FakeResource implements MaaResourceLike {
   static paths: string[] = [];
+  static bundles: string[] = [];
   static failAll = false;
   /** 模拟「路径存在但模型文件坏了」：post_ocr_model 直接抛错。 */
   static throwOnLoad = false;
@@ -118,6 +119,12 @@ class FakeResource implements MaaResourceLike {
     return job;
   }
 
+  post_bundle(path: string): MaaJobLike {
+    FakeResource.bundles.push(path);
+    const job: MaaJobLike = { succeeded: true, status: 1, wait: async () => job };
+    return job;
+  }
+
   destroy(): void {
     this.loaded = false;
   }
@@ -128,11 +135,34 @@ class FakeTasker implements MaaTaskerLike {
   /** 识别结果，坐标是帧内像素，由用例按 1280×720 布置。 */
   static entries: Array<{ text: string; box: [number, number, number, number] }> = [];
   static created: FakeTasker[] = [];
+  /** pipeline 假结果：入口、override、轨迹与是否成功。 */
+  static pipelineSucceeded = true;
+  static pipelineStatus = 1;
+  static pipelineCalls: Array<{ entry: string; override: unknown }> = [];
+  static pipelineStops = 0;
+  static traceNames: string[] = [];
   resource: MaaResourceLike | null = null;
   controller: MaaControllerLike | null = null;
 
   constructor() {
     FakeTasker.created.push(this);
+  }
+
+  post_task(entry: string, override?: Record<string, unknown> | string): MaaTaskJobLike {
+    FakeTasker.pipelineCalls.push({ entry, override });
+    const job: MaaTaskJobLike = {
+      id: 99,
+      succeeded: FakeTasker.pipelineSucceeded,
+      status: FakeTasker.pipelineStatus,
+      wait: async () => job,
+      get: () => ({ entry, nodes: FakeTasker.traceNames.map((_, index) => index + 1) }),
+    };
+    return job;
+  }
+
+  post_stop(): MaaJobLike {
+    FakeTasker.pipelineStops += 1;
+    return jobOf(true);
   }
 
   post_recognition(_type: string, _param: Record<string, unknown>, _image: ArrayBuffer): MaaTaskJobLike {
@@ -146,9 +176,9 @@ class FakeTasker implements MaaTaskerLike {
     return job;
   }
 
-  node_detail(_id: number): unknown {
+  node_detail(id: number): unknown {
     return {
-      name: 'demo',
+      name: FakeTasker.traceNames[id - 1] ?? 'demo',
       reco: {
         name: 'OCR',
         algorithm: 'OCR',
@@ -190,11 +220,17 @@ beforeEach(() => {
   FakeController.noResolution = false;
   FakeController.emptyImage = false;
   FakeResource.paths = [];
+  FakeResource.bundles = [];
   FakeResource.failAll = false;
   FakeResource.throwOnLoad = false;
   FakeResource.instances = [];
   FakeTasker.entries = [];
   FakeTasker.created = [];
+  FakeTasker.pipelineSucceeded = true;
+  FakeTasker.pipelineStatus = 1;
+  FakeTasker.pipelineCalls = [];
+  FakeTasker.pipelineStops = 0;
+  FakeTasker.traceNames = [];
   imageBytes = pngHeader(1280, 720);
 });
 
@@ -904,5 +940,136 @@ describe('明日方舟 World', () => {
     ));
     expect(outcome.text).toContain('没在画面里读到「关卡列表」');
     expect(outcome.text).toContain('不代表点击一定没生效');
+  });
+
+  it('ark_enter_stage：资源本走 NavResource@Begin，回报轨迹与理智且不点开始', async () => {
+    writeFakeModel(scratchDir);
+    FakeTasker.traceNames = ['NavResource@Enter', 'NavResource@FindStage', 'NavCommon@ConfirmFormation'];
+    FakeTasker.entries = [
+      { text: '开始行动', box: [980, 640, 180, 50] },
+      { text: '理智 -30', box: [100, 600, 200, 40] },
+      { text: '118/135', box: [1120, 20, 120, 30] },
+    ];
+    const { world } = newWorld();
+    await toolOf(world, 'ark_connect').handler({}, call);
+
+    const outcome = receipt(await toolOf(world, 'ark_enter_stage').handler({ stage_code: 'CE-5' }, call));
+    expect(outcome.failed).toBeUndefined();
+    expect(FakeTasker.pipelineCalls).toHaveLength(1);
+    expect(FakeTasker.pipelineCalls[0]!.entry).toBe('NavResource@Begin');
+    expect(JSON.stringify(FakeTasker.pipelineCalls[0]!.override)).toContain('CE');
+    expect(outcome.text).toContain('已到编队界面');
+    expect(outcome.text).toContain('资源本 CE-5');
+    expect(outcome.text).toContain('理智 -30');
+    expect(outcome.text).toContain('没有点击「开始行动」');
+    expect(FakeController.clicks).toEqual([]);
+  });
+
+  it('ark_enter_stage：start=true 且理智够时才点开始行动', async () => {
+    writeFakeModel(scratchDir);
+    FakeTasker.entries = [
+      { text: '开始行动', box: [980, 640, 180, 50] },
+      { text: '理智 -6', box: [100, 600, 200, 40] },
+      { text: '118/135', box: [1120, 20, 120, 30] },
+    ];
+    const { world } = newWorld();
+    await toolOf(world, 'ark_connect').handler({}, call);
+
+    const outcome = receipt(await toolOf(world, 'ark_enter_stage').handler(
+      { stage_code: '1-7', start: true },
+      call,
+    ));
+    expect(outcome.failed).toBeUndefined();
+    expect(FakeTasker.pipelineCalls[0]!.entry).toBe('NavMain@Begin');
+    expect(FakeController.clicks).toHaveLength(1);
+    expect(outcome.text).toContain('已点击「开始行动」');
+  });
+
+  it('ark_enter_stage：理智不够时一次点击都不发', async () => {
+    writeFakeModel(scratchDir);
+    FakeTasker.entries = [
+      { text: '开始行动', box: [980, 640, 180, 50] },
+      { text: '理智 -30', box: [100, 600, 200, 40] },
+      { text: '10/135', box: [1120, 20, 120, 30] },
+    ];
+    const { world } = newWorld();
+    await toolOf(world, 'ark_connect').handler({}, call);
+
+    const outcome = receipt(await toolOf(world, 'ark_enter_stage').handler(
+      { stage_code: 'CE-5', start: true },
+      call,
+    ));
+    expect(outcome.failed).toBeUndefined();
+    expect(outcome.text).toContain('理智不够');
+    expect(FakeController.clicks).toEqual([]);
+  });
+
+  it('ark_enter_stage：pipeline 失败时回报轨迹与可见文字，且零点击', async () => {
+    writeFakeModel(scratchDir);
+    FakeTasker.pipelineSucceeded = false;
+    FakeTasker.pipelineStatus = 4000;
+    FakeTasker.traceNames = ['NavResource@Enter'];
+    FakeTasker.entries = [{ text: '终端', box: [80, 560, 100, 40] }];
+    const { world } = newWorld();
+    await toolOf(world, 'ark_connect').handler({}, call);
+
+    const outcome = receipt(await toolOf(world, 'ark_enter_stage').handler({ stage_code: 'LS-5' }, call));
+    expect(outcome.failed).toBe(true);
+    expect(outcome.text).toContain('资源本 LS-5失败');
+    expect(outcome.text).toContain('状态码 4000');
+    expect(outcome.text).toContain('进入资源收集');
+    expect(outcome.text).toContain('终端');
+    expect(FakeController.clicks).toEqual([]);
+  });
+
+  it('ark_enter_stage：不支持的代号直接拒绝，不启动 pipeline', async () => {
+    writeFakeModel(scratchDir);
+    const { world } = newWorld();
+    await toolOf(world, 'ark_connect').handler({}, call);
+
+    const outcome = receipt(await toolOf(world, 'ark_enter_stage').handler({ stage_code: 'ZZ-9' }, call));
+    expect(outcome.failed).toBe(true);
+    expect(outcome.text).toContain('还没支持这个活动关卡');
+    expect(FakeTasker.pipelineCalls).toEqual([]);
+    expect(FakeController.clicks).toEqual([]);
+  });
+
+  it('ark_open_roguelike：导航到主题页后不点开始探索', async () => {
+    writeFakeModel(scratchDir);
+    FakeTasker.traceNames = ['NavRoguelike@Enter', 'NavRoguelike@FindTheme', 'NavRoguelike@ThemeHome'];
+    FakeTasker.entries = [
+      { text: '开始探索', box: [980, 560, 200, 60] },
+      { text: '傀影与猩红孤钻', box: [300, 400, 300, 40] },
+    ];
+    const { world } = newWorld();
+    await toolOf(world, 'ark_connect').handler({}, call);
+
+    const outcome = receipt(await toolOf(world, 'ark_open_roguelike').handler({ theme: '傀影' }, call));
+    expect(outcome.failed).toBeUndefined();
+    expect(FakeTasker.pipelineCalls[0]!.entry).toBe('NavRoguelike@Begin');
+    expect(JSON.stringify(FakeTasker.pipelineCalls[0]!.override)).toContain('傀影');
+    expect(outcome.text).toContain('已到「傀影」主题页面');
+    expect(outcome.text).toContain('没有点击「开始探索」');
+    expect(FakeController.clicks).toEqual([]);
+  });
+
+  it('ark_open_roguelike：不认识的主题直接拒绝', async () => {
+    const { world } = newWorld();
+    await toolOf(world, 'ark_connect').handler({}, call);
+
+    const outcome = receipt(await toolOf(world, 'ark_open_roguelike').handler({ theme: '不存在' }, call));
+    expect(outcome.failed).toBe(true);
+    expect(outcome.text).toContain('不认识这个集成战略主题');
+    expect(FakeTasker.pipelineCalls).toEqual([]);
+  });
+
+  it('选关与集成战略入口：未连接时都要求先 ark_connect', async () => {
+    const { world } = newWorld();
+    const stage = receipt(await toolOf(world, 'ark_enter_stage').handler({ stage_code: 'CE-5' }, call));
+    const theme = receipt(await toolOf(world, 'ark_open_roguelike').handler({ theme: '傀影' }, call));
+    expect(stage.failed).toBe(true);
+    expect(stage.text).toContain('ark_connect');
+    expect(theme.failed).toBe(true);
+    expect(theme.text).toContain('ark_connect');
   });
 });

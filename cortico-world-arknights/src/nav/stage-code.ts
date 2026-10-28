@@ -41,7 +41,9 @@ function normalizeSegment(segment: string): string {
  */
 export function normalizeOcrCode(text: string): string {
   const cleaned = String(text ?? '').replace(/[「」『』【】[\]()（）:：,，.!?]/g, '');
-  const base = normalizeStageCode(cleaned);
+  // 小写 `l` 在数字段里几乎总是 `1`；先转成 `I`，再由数字段规则统一纠成 `1`。
+  // 大写 `L` 不动，避免把 `LS-5` 改坏。
+  const base = normalizeStageCode(cleaned.replace(/l/g, 'I'));
   const withDash = /^[A-Z]{2,3}\d+$/.test(base) ? base.replace(/^([A-Z]{2,3})(\d+)$/, '$1-$2') : base;
   return withDash.split('-').filter((part) => part !== '').map(normalizeSegment).join('-');
 }
