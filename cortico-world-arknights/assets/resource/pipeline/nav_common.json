@@ -1,0 +1,14 @@
+{
+  "NavCommon@Ping": {
+    "recognition": "DirectHit",
+    "action": "DoNothing",
+    "next": []
+  },
+  "NavCommon@ConfirmFormation": {
+    "recognition": "OCR",
+    "expected": ["开始行动", "代理指挥"],
+    "roi": [880, 540, 400, 180],
+    "action": "DoNothing",
+    "timeout": 5000
+  }
+}

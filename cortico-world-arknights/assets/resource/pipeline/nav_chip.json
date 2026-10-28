@@ -1,0 +1,33 @@
+{
+  "NavChip@Begin": {
+    "recognition": "DirectHit",
+    "action": "DoNothing",
+    "next": ["NavChip@FindStage", "NavChip@Enter"],
+    "timeout": 3000
+  },
+  "NavChip@Enter": {
+    "recognition": "OCR",
+    "expected": ["芯片搜索", "芯片"],
+    "roi": [380, 540, 340, 180],
+    "action": "Click",
+    "next": ["NavChip@FindStage"],
+    "timeout": 5000,
+    "on_error": ["NavChip@Scroll"]
+  },
+  "NavChip@FindStage": {
+    "recognition": "OCR",
+    "expected": "__STAGE__",
+    "roi": [20, 80, 1240, 520],
+    "action": "Click",
+    "next": ["NavCommon@ConfirmFormation"]
+  },
+  "NavChip@Scroll": {
+    "recognition": "DirectHit",
+    "action": "Swipe",
+    "begin": [300, 310],
+    "end": [880, 310],
+    "duration": 200,
+    "next": ["NavChip@FindStage", "NavChip@Scroll"],
+    "max_hit": 6
+  }
+}

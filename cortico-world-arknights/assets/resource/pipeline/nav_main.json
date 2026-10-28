@@ -1,0 +1,68 @@
+{
+  "NavMain@Begin": {
+    "recognition": "DirectHit",
+    "action": "DoNothing",
+    "next": ["NavMain@FindStage", "NavMain@Chapter", "NavMain@EnterOperation"],
+    "timeout": 3000
+  },
+  "NavMain@EnterOperation": {
+    "recognition": "OCR",
+    "expected": ["作战"],
+    "roi": [300, 520, 680, 200],
+    "action": "Click",
+    "next": ["NavMain@EnterTheme"],
+    "timeout": 5000
+  },
+  "NavMain@EnterTheme": {
+    "recognition": "OCR",
+    "expected": ["主题曲"],
+    "roi": [180, 540, 320, 180],
+    "action": "Click",
+    "next": ["NavMain@Chapter"],
+    "timeout": 5000,
+    "on_error": ["NavMain@EnterEpisode"]
+  },
+  "NavMain@Chapter": {
+    "recognition": "OCR",
+    "expected": "__CHAPTER__",
+    "roi": [100, 20, 340, 200],
+    "action": "Click",
+    "next": ["NavMain@EnterEpisode"],
+    "timeout": 5000,
+    "on_error": ["NavMain@ScrollChapters"]
+  },
+  "NavMain@ScrollChapters": {
+    "recognition": "DirectHit",
+    "action": "Swipe",
+    "begin": [1250, 580],
+    "end": [1250, 110],
+    "duration": 1000,
+    "next": ["NavMain@Chapter", "NavMain@ScrollChapters"],
+    "max_hit": 6
+  },
+  "NavMain@EnterEpisode": {
+    "recognition": "OCR",
+    "expected": ["前往章节"],
+    "roi": [1020, 560, 220, 100],
+    "action": "Click",
+    "next": ["NavMain@FindStage"],
+    "timeout": 5000,
+    "on_error": ["NavMain@ScrollStage"]
+  },
+  "NavMain@FindStage": {
+    "recognition": "OCR",
+    "expected": "__STAGE__",
+    "roi": [0, 140, 1080, 380],
+    "action": "Click",
+    "next": ["NavCommon@ConfirmFormation"]
+  },
+  "NavMain@ScrollStage": {
+    "recognition": "DirectHit",
+    "action": "Swipe",
+    "begin": [900, 100],
+    "end": [300, 100],
+    "duration": 150,
+    "next": ["NavMain@FindStage", "NavMain@ScrollStage"],
+    "max_hit": 8
+  }
+}

@@ -1,0 +1,55 @@
+{
+  "NavRoguelike@Begin": {
+    "recognition": "DirectHit",
+    "action": "DoNothing",
+    "next": ["NavRoguelike@ThemeHome", "NavRoguelike@Enter"],
+    "timeout": 3000
+  },
+  "NavRoguelike@Enter": {
+    "recognition": "OCR",
+    "expected": ["集成战略"],
+    "roi": [800, 540, 380, 180],
+    "action": "Click",
+    "next": ["NavRoguelike@OpenThemeList"],
+    "timeout": 5000,
+    "on_error": ["NavRoguelike@EnterByPoint"]
+  },
+  "NavRoguelike@EnterByPoint": {
+    "recognition": "DirectHit",
+    "action": "Click",
+    "target": [957, 663, 1, 1],
+    "next": ["NavRoguelike@OpenThemeList"]
+  },
+  "NavRoguelike@OpenThemeList": {
+    "recognition": "OCR",
+    "expected": ["查看"],
+    "roi": [400, 430, 180, 140],
+    "action": "Click",
+    "next": ["NavRoguelike@FindTheme"],
+    "timeout": 4000,
+    "on_error": ["NavRoguelike@ScrollTheme"]
+  },
+  "NavRoguelike@FindTheme": {
+    "recognition": "OCR",
+    "expected": "__THEME__",
+    "roi": [0, 380, 1280, 80],
+    "action": "Click",
+    "next": ["NavRoguelike@ThemeHome"]
+  },
+  "NavRoguelike@ScrollTheme": {
+    "recognition": "DirectHit",
+    "action": "Swipe",
+    "begin": [550, 560],
+    "end": [100, 560],
+    "duration": 300,
+    "next": ["NavRoguelike@FindTheme", "NavRoguelike@ScrollTheme"],
+    "max_hit": 5
+  },
+  "NavRoguelike@ThemeHome": {
+    "recognition": "OCR",
+    "expected": ["开始探索", "深入调查"],
+    "roi": [980, 400, 300, 320],
+    "action": "DoNothing",
+    "timeout": 5000
+  }
+}

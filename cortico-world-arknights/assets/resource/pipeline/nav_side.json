@@ -1,0 +1,76 @@
+{
+  "NavSide@Begin": {
+    "recognition": "DirectHit",
+    "action": "DoNothing",
+    "next": ["NavSide@FindStage", "NavSide@FindActivity", "NavSide@EnterOperation"],
+    "timeout": 3000
+  },
+  "NavSide@EnterOperation": {
+    "recognition": "OCR",
+    "expected": ["作战"],
+    "roi": [300, 520, 680, 200],
+    "action": "Click",
+    "next": ["NavSide@EnterTab"],
+    "timeout": 5000
+  },
+  "NavSide@EnterTab": {
+    "recognition": "OCR",
+    "expected": "__TAB__",
+    "roi": [120, 20, 1040, 120],
+    "action": "Click",
+    "next": ["NavSide@FindActivity"],
+    "timeout": 4000,
+    "on_error": ["NavSide@FindActivity"]
+  },
+  "NavSide@FindActivity": {
+    "recognition": "OCR",
+    "expected": "__ACTIVITY__",
+    "roi": [40, 80, 1200, 560],
+    "action": "Click",
+    "next": ["NavSide@Start"],
+    "timeout": 4000,
+    "on_error": ["NavSide@ScrollActivities"]
+  },
+  "NavSide@ScrollActivities": {
+    "recognition": "DirectHit",
+    "action": "Swipe",
+    "begin": [300, 310],
+    "end": [880, 310],
+    "duration": 200,
+    "next": ["NavSide@FindActivity", "NavSide@ScrollActivities"],
+    "max_hit": 5
+  },
+  "NavSide@Start": {
+    "recognition": "OCR",
+    "expected": ["演出开始", "前往章节"],
+    "roi": [900, 360, 380, 260],
+    "action": "Click",
+    "next": ["NavSide@FindStage"],
+    "timeout": 5000,
+    "on_error": ["NavSide@EnterEpisode"]
+  },
+  "NavSide@EnterEpisode": {
+    "recognition": "OCR",
+    "expected": ["前往章节"],
+    "roi": [1020, 560, 220, 100],
+    "action": "Click",
+    "next": ["NavSide@FindStage"],
+    "timeout": 4000
+  },
+  "NavSide@FindStage": {
+    "recognition": "OCR",
+    "expected": "__STAGE__",
+    "roi": [0, 60, 1280, 580],
+    "action": "Click",
+    "next": ["NavCommon@ConfirmFormation"]
+  },
+  "NavSide@ScrollStage": {
+    "recognition": "DirectHit",
+    "action": "Swipe",
+    "begin": [900, 100],
+    "end": [300, 100],
+    "duration": 150,
+    "next": ["NavSide@FindStage", "NavSide@ScrollStage"],
+    "max_hit": 8
+  }
+}

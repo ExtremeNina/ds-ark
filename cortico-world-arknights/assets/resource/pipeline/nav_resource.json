@@ -1,0 +1,33 @@
+{
+  "NavResource@Begin": {
+    "recognition": "DirectHit",
+    "action": "DoNothing",
+    "next": ["NavResource@FindStage", "NavResource@Enter"],
+    "timeout": 3000
+  },
+  "NavResource@Enter": {
+    "recognition": "OCR",
+    "expected": ["资源收集"],
+    "roi": [380, 540, 340, 180],
+    "action": "Click",
+    "next": ["NavResource@FindStage"],
+    "timeout": 5000,
+    "on_error": ["NavResource@Scroll"]
+  },
+  "NavResource@FindStage": {
+    "recognition": "OCR",
+    "expected": "__STAGE__",
+    "roi": [700, 80, 580, 420],
+    "action": "Click",
+    "next": ["NavCommon@ConfirmFormation"]
+  },
+  "NavResource@Scroll": {
+    "recognition": "DirectHit",
+    "action": "Swipe",
+    "begin": [300, 310],
+    "end": [880, 310],
+    "duration": 200,
+    "next": ["NavResource@FindStage", "NavResource@Scroll"],
+    "max_hit": 8
+  }
+}
