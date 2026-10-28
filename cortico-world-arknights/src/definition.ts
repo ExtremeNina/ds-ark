@@ -32,8 +32,8 @@ export const ARKNIGHTS: WorldDefinition<ArknightsConfigSection> = {
         en: 'Captures the frame and reads cost, life points, enemies left, the pause banner and hand costs; unreadable fields are reported as missing.',
       },
       ark_deploy: {
-        zh: '把手牌拖到战场地块并拖出朝向；回执只说明拖拽已发出，落位与否由画面判断。',
-        en: 'Drags one hand card onto a battlefield tile and sets the facing; the receipt only states that the drags were sent.',
+        zh: '【调试工具，实战严禁调用】把手牌拖到战场地块并拖出朝向；战斗请一律组装 Copilot plan 交由 ark_run_copilot (MaaCore) 全权托管。',
+        en: 'Debug tool: drags one hand card onto a battlefield tile. In actual battle, always format into a plan and use ark_run_copilot.',
       },
       ark_enter_stage: {
         zh: '用内置 pipeline 导航到关卡编队页（资源本 / 芯片本 / 主线 / 已收录活动）；默认不点「开始行动」。',
@@ -64,8 +64,8 @@ export const ARKNIGHTS: WorldDefinition<ArknightsConfigSection> = {
         en: 'Recognises operator cards on screen (formation or roster) and returns names with coordinates; supports searching by name.',
       },
       ark_run_copilot: {
-        zh: '执行一份 MAA Copilot 战斗作业 JSON（含下干员、开技能、撤退、2倍速等动作），自动监控费用并汇报执行进度与战果。',
-        en: 'Executes an MAA Copilot battle plan JSON (deploy, skill, retreat, 2x speed), monitoring DP and reporting battle outcome.',
+        zh: '将 Copilot 战斗计划 JSON（支持作业站作业或根据当前编队自创的战术 plan）交给 MaaCore 原生全权托管执行，自动识别人脸、监控费用下干员、开技能与结算。',
+        en: 'Executes an MAA Copilot battle plan JSON via MaaCore native engine (supports preset plans or LLM custom plans for current team), monitoring DP and auto deploying.',
       },
       ark_fetch_copilot: {
         zh: '检索指定关卡的内置或本地 Copilot 战斗作业；若提供当前编队干员，会自动比对缺漏并给出建议。',

@@ -101,10 +101,8 @@ export const ARKNIGHTS_TOOL_DECLS: ReadonlyArray<ToolSpec> = [
   {
     name: 'ark_deploy',
     description:
-      'Drag one hand card onto a battlefield tile, then drag from that tile towards a direction to deploy an '
-      + 'operator. card and tile are normalised 0-1 points taken from an attached frame; direction is '
-      + 'up/down/left/right. The receipt only states that the drags were sent, and (when verifyAfterClick is on) '
-      + 'attaches the frame captured right after them.',
+      '【调试专用 / 实战严禁调用】Drag one hand card onto a battlefield tile. '
+      + '注意：实战中严禁单步手动拖拽部署干员（网络与推理延迟会导致漏怪败北）。无论抄作业还是自创编队打关，必须将部署计划组装为 Copilot plan 传入 ark_run_copilot 由 MaaCore 原生引擎全权托管战斗！',
     tags: ['act'],
     parameters: {
       type: 'object',
@@ -298,8 +296,9 @@ export const ARKNIGHTS_TOOL_DECLS: ReadonlyArray<ToolSpec> = [
   {
     name: 'ark_run_copilot',
     description:
-      'Execute an MAA Copilot battle plan JSON (or simplified JSON) during battle. '
-      + 'Monitors DP (costs), triggers Deploy, SpeedUp, Skill, Retreat in sequence, and checks battle outcome (victory / defeat).',
+      'Execute an MAA Copilot battle plan JSON during battle via native MaaCore engine. '
+      + '支持从作业站检索的标准作业，也全力支持大模型根据用户当前编队自己构思的部署计划 JSON (actions: [{ type: "Deploy", name: "干员名", location: [col, row], direction: "Right" }])。'
+      + 'MaaCore 原生引擎会自动毫秒级监控费用、识别人脸卡牌、吸附地块并自动放技能直至战斗结算。实战中所有战斗一律通过此工具全托管，严禁手动逐个拖拽部署。',
     tags: ['act'],
     parameters: {
       type: 'object',
@@ -566,7 +565,7 @@ export class ArknightsWorld implements World {
       text: '明日方舟 World 已挂载。14 个工具可用：连接（ark_connect）、截图（ark_screencap）、'
         + '选关导航（ark_enter_stage）、干员识别（ark_find_operators）、'
         + 'Copilot 战斗执行（ark_run_copilot）、作业检索（ark_fetch_copilot）、'
-        + '战场监控（ark_battle_state）等；战斗时必须使用 ark_run_copilot 自动作战，严禁手动逐个拖拽部署。',
+        + '战场监控（ark_battle_state）等；战斗时无论抄作业还是自创队伍，一律组装为 Copilot plan 交由 ark_run_copilot (MaaCore) 自动全权托管作战，严禁手动逐个拖拽部署。',
     });
   }
 
@@ -857,7 +856,7 @@ export class ArknightsWorld implements World {
     if (typeof raw !== 'number' || !Number.isFinite(raw)) return fail('参数 ms 必须是数字（毫秒）。');
     const ms = Math.max(0, Math.min(10_000, Math.round(raw)));
     await new Promise((resolve) => setTimeout(resolve, ms));
-    return `已等待 ${ms} 毫秒。现在可以再调用 ark_battle_state 看状态，或继续 ark_deploy。`;
+    return `已等待 ${ms} 毫秒。现在可以再调用 ark_battle_state 或 ark_screencap 查看状态。`;
   }
 
   /** 动作类工具的收尾：按配置决定要不要补拍一帧，三处共用一套措辞。 */
