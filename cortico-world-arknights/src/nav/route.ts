@@ -4,7 +4,7 @@
  * 这里是「选哪条路线」的全部逻辑：pipeline 只认哨兵文本，路由负责把它换成真实代号；
  * 忘记传 override 时哨兵匹配失败，不会误点。
  */
-import { chapterLabel } from './chapters.ts';
+import { chapterKeywords, chapterLabel } from './chapters.ts';
 import { sideActivityOf, supportedSideActivities, type Roi } from './side-activities.ts';
 import { supportedThemes, themeKeywords } from './roguelike-themes.ts';
 import {
@@ -93,12 +93,13 @@ export function routeFor(stageCode: string, options?: RouteOptions): RouteResult
   if (isMainStage(code)) {
     const chapter = mainChapterOf(code);
     if (chapter === null) return { ok: false, error: `主线代号读不出章节：${stageCode}` };
+    const keywords = chapterKeywords(chapter);
     const overrides: Record<string, unknown> = {
-      'NavMain@Chapter': { expected: chapterLabel(chapter) },
+      'NavMain@Chapter': { expected: [...keywords] },
       'NavMain@FindStage': { expected: stagePattern(code), roi: [...MAIN_STAGE_ROI] },
     };
     addScroll(overrides, 'NavMain@ScrollStage', options);
-    return route('NavMain@Begin', `主线 ${code}`, overrides, 'formation');
+    return route('NavMain@Begin', `主线 ${code}（${chapterLabel(chapter)}）`, overrides, 'formation');
   }
 
   if (isSideStage(code)) {

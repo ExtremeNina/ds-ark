@@ -28,12 +28,22 @@ describe('关卡路由', () => {
     expect(overridesOf(two)['NavChip@FindStage']).toMatchObject({ roi: [472, 0, 793, 502] });
   });
 
-  it('主线：代号前缀变成章节页签', () => {
-    const result = routeFor('1-7');
-    if (!result.ok) throw new Error(result.error);
-    expect(result.route.entry).toBe('NavMain@Begin');
-    expect(result.route.overrides['NavMain@Chapter']).toMatchObject({ expected: '觉醒' });
-    expect(JSON.stringify(result.route.overrides['NavMain@FindStage'])).toContain('1');
+  it('主线：代号前缀生成多关键词匹配列表，覆盖篇章名与卡片名', () => {
+    const one = routeFor('1-7');
+    if (!one.ok) throw new Error(one.error);
+    expect(one.route.entry).toBe('NavMain@Begin');
+    const oneExpected = (one.route.overrides['NavMain@Chapter'] as { expected: string[] }).expected;
+    expect(oneExpected).toContain('觉醒');
+    expect(oneExpected).toContain('黑暗时代');
+    expect(JSON.stringify(one.route.overrides['NavMain@FindStage'])).toContain('1');
+
+    const two = routeFor('2-10');
+    if (!two.ok) throw new Error(two.error);
+    expect(two.route.entry).toBe('NavMain@Begin');
+    const twoExpected = (two.route.overrides['NavMain@Chapter'] as { expected: string[] }).expected;
+    expect(twoExpected).toContain('异卵同生');
+    expect(twoExpected).toContain('觉醒');
+    expect(JSON.stringify(two.route.overrides['NavMain@FindStage'])).toContain('2');
   });
 
   it('SideStory：活动关键词、页签与 ROI 都进 override', () => {
