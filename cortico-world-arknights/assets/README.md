@@ -1,3 +1,9 @@
+# 资源边界
+
+本目录只放本项目自己的 pipeline（`resource/pipeline/`）与随包的 PP-OCRv6 模型（`resource/model/ocr/`）。
+MaaAssistantArknights 的 `tasks/`、`template/`、`copilot/`、`roguelike/`、`Arknights-Tile-Pos/` 不在这里，
+也不会随扩展发布；坐标与 ROI 只是以常量形式重写在源码与自有 pipeline 里。
+
 # PaddleOCR model
 
 2026/06/12

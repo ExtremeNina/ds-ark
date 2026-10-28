@@ -9,3 +9,5 @@
 2. **冒烟/联调脚本不进扩展包。** 需要真机、游戏窗口或原生模块才能跑的脚本（如 `smoke.ts`）一律放在仓库根的 `test/` 包里，不写进 `cortico-world-arknights/`；扩展包只保留运行时源码与单测，其 `package.json` 的 `files` 白名单不得包含这类脚本。
 
 3. **真机冒烟由用户本人执行，Agent 不代为操作游戏。** 游戏窗口的启动、切前台、进战斗、提权运行都由用户掌控；Agent 的职责是准备好脚本与命令、说明预期输出和判定标准，并在拿到用户回贴的结果后再改代码。**不要自行运行 `test/` 下的冒烟脚本，也不要用其他手段向游戏窗口发点击或按键**（包括临时探针脚本）。只读的窗口枚举、进程查询等诊断可以做，但也应先说明意图。
+
+4. **资源边界：仓库只放代码与自有 pipeline。** 不把 MAA（MaaAssistantArknights）的 `tasks/`、`template/`、`copilot/`、`roguelike/`、`Arknights-Tile-Pos/` 复制进本仓库或扩展包；需要其中的坐标、ROI、关卡数据时，只把数值重写成本项目自己的常量或 pipeline JSON，并在注释里注明来源与版本。随包的第三方资源目前只有 OCR 模型（`assets/resource/model/ocr/`）；新增或移除它属于单独改动，必须同时更新 README 与 CHANGELOG。

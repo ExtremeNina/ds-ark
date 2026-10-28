@@ -20,6 +20,9 @@ Release checklist for this Cortico World extension. Contract references:
 - [ ] **`files`**: ships `src`, `assets`, `README.md`, `BATTLE_PLAYBOOK.md`, `CHANGELOG.md`, `LICENSE`, `describe.json` only.
       `tests/` stays out of the published package, and real-machine scripts live in the repo-level
       `test/` package, never here.
+- [ ] **Resources**: `assets` ships only our own `resource/pipeline` and the bundled OCR model.
+      Never copy MAA's `tasks/`, `template/`, `copilot/`, `roguelike/` or `Arknights-Tile-Pos/` into the
+      package; coordinates and ROIs borrowed from MAA are rewritten as our own constants.
 - [ ] **OCR assets**: `assets/resource/model/ocr/` must keep `det.onnx`, `rec.onnx` and `keys.txt`
       flat in that one directory. MaaFramework looks up exactly these three names and never descends
       into subdirectories; a nested copy fails at recognition time with `det=0 rec=0`.
