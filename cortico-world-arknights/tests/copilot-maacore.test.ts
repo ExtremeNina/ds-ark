@@ -1,10 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
-import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
-import { tmpdir } from 'node:os';
-import type { MaaResourceLike, MaaTaskJobLike, MaaTaskerLike } from '../src/mfw/native.ts';
+import type { MaaCoreLib } from '../src/mfw/asst-ffi.ts';
 import type { CopilotPlan } from '../src/battle/copilot.ts';
-import { findMaaResourceDir, isMaaCoreBattleSupported, runMaaCoreCopilot } from '../src/battle/copilot-maacore.ts';
+import { isMaaCoreBattleSupported, runMaaCoreCopilot } from '../src/battle/copilot-maacore.ts';
 
 const mockPlan: CopilotPlan = {
   stage_name: '1-7',
@@ -14,121 +11,82 @@ const mockPlan: CopilotPlan = {
   ],
 };
 
-function createMockTasker(succeeds = true): { tasker: MaaTaskerLike; postTaskSpy: any; stopSpy: any; sinks: any[] } {
-  const sinks: any[] = [];
-  const postTaskSpy = vi.fn().mockImplementation((entry: string, param: any) => {
-    return {
-      id: 101,
-      succeeded: succeeds,
-      status: succeeds ? 2 : 4,
-      wait: async () => {
-        // 模拟触发 sink
-        for (const s of sinks) {
-          s('Node_Deploy', { operator: '芬' });
-          s('Copilot_Accomplished', { stars: 3 });
-        }
-        return { succeeded: succeeds, status: succeeds ? 2 : 4 };
-      },
-      get: () => ({}),
-    } as unknown as MaaTaskJobLike;
+function createMockMaaLib(succeeds = true): { lib: MaaCoreLib; appendSpy: any; startSpy: any; stopSpy: any } {
+  let callbackRef: ((msg: number, details: string) => void) | null = null;
+  let isRunning = false;
+
+  const appendSpy = vi.fn().mockReturnValue(101);
+  const startSpy = vi.fn().mockImplementation(() => {
+    isRunning = true;
+    setTimeout(() => {
+      if (callbackRef) {
+        callbackRef(1, JSON.stringify({ sub_task: 'Deploy', operator: '芬' }));
+        callbackRef(2, JSON.stringify({ result: succeeds ? 'Accomplished' : 'Failed' }));
+      }
+      isRunning = false;
+    }, 50);
+    return true;
+  });
+  const stopSpy = vi.fn().mockImplementation(() => {
+    isRunning = false;
+    return true;
   });
 
-  const stopSpy = vi.fn().mockReturnValue({
-    succeeded: true,
-    status: 0,
-    wait: async () => ({ succeeded: true, status: 0 }),
-  });
-
-  const tasker: MaaTaskerLike = {
-    resource: null,
-    controller: null,
-    post_task: postTaskSpy,
-    post_stop: stopSpy,
-    post_recognition: vi.fn(),
-    add_sink: vi.fn((sink) => {
-      sinks.push(sink);
-      return sinks.length;
+  const lib: MaaCoreLib = {
+    version: 'v6.20.1',
+    create: vi.fn((cb) => {
+      callbackRef = cb;
+      return 12345n;
     }),
-    remove_sink: vi.fn(),
-    node_detail: vi.fn(),
-    recognition_detail: vi.fn(),
     destroy: vi.fn(),
+    loadResource: vi.fn().mockReturnValue(true),
+    setUserDir: vi.fn().mockReturnValue(true),
+    attachWindow: vi.fn().mockReturnValue(true),
+    connect: vi.fn().mockReturnValue(true),
+    connected: vi.fn().mockReturnValue(true),
+    appendTask: appendSpy,
+    start: startSpy,
+    stop: stopSpy,
+    running: vi.fn(() => isRunning),
   };
 
-  return { tasker, postTaskSpy, stopSpy, sinks };
+  return { lib, appendSpy, startSpy, stopSpy };
 }
 
-function createMockResource(): MaaResourceLike {
-  return {
-    loaded: true,
-    post_ocr_model: vi.fn().mockReturnValue({ succeeded: true, status: 0, wait: async () => ({ succeeded: true }) }),
-    post_bundle: vi.fn().mockReturnValue({ succeeded: true, status: 0, wait: async () => ({ succeeded: true }) }),
-    destroy: vi.fn(),
-  };
-}
-
-describe('MaaCore Copilot 战斗驱动', () => {
-  it('findMaaResourceDir 能正确验证有效 MAA 资源目录', () => {
-    const fakeDir = join(tmpdir(), `fake_maa_res_${Date.now()}`);
-    mkdirSync(join(fakeDir, 'pipeline'), { recursive: true });
-
-    try {
-      expect(findMaaResourceDir(fakeDir)).toBe(fakeDir);
-      expect(findMaaResourceDir('C:/NonExistentPath_XYZ')).toBeNull();
-    } finally {
-      rmSync(fakeDir, { recursive: true, force: true });
-    }
+describe('MaaCore Copilot 战斗驱动 (方案B 原生直连)', () => {
+  it('isMaaCoreBattleSupported 在提供 lib 时返回 true', () => {
+    const { lib } = createMockMaaLib();
+    expect(isMaaCoreBattleSupported(undefined, lib)).toBe(true);
   });
 
-  it('isMaaCoreBattleSupported 在缺少 Tasker 或资源包时返回 false', () => {
-    expect(isMaaCoreBattleSupported(null, null)).toBe(false);
-    const { tasker } = createMockTasker();
-    expect(isMaaCoreBattleSupported(tasker, null)).toBe(false);
-  });
+  it('runMaaCoreCopilot 成功启动任务、收集回调日志并回报胜利', async () => {
+    const { lib, appendSpy, startSpy } = createMockMaaLib(true);
 
-  it('runMaaCoreCopilot 成功启动任务、收集 Sink 日志并回报胜利', async () => {
-    const fakeDir = join(tmpdir(), `fake_maa_run_${Date.now()}`);
-    mkdirSync(join(fakeDir, 'image'), { recursive: true });
+    const outcome = await runMaaCoreCopilot({
+      plan: mockPlan,
+      hwnd: 0x1234,
+      maxSeconds: 5,
+      lib,
+    });
 
-    const { tasker, postTaskSpy } = createMockTasker(true);
-    const resource = createMockResource();
-
-    try {
-      const outcome = await runMaaCoreCopilot({
-        plan: mockPlan,
-        tasker,
-        resource,
-        maaResourceDir: fakeDir,
-      });
-
-      expect(outcome.ok).toBe(true);
-      expect(outcome.resultText).toContain('作战胜利');
-      expect(postTaskSpy).toHaveBeenCalledWith('Copilot', expect.objectContaining({ formation: false }));
-      expect(outcome.logs.some((l) => l.includes('[MaaCore] Node_Deploy'))).toBe(true);
-    } finally {
-      rmSync(fakeDir, { recursive: true, force: true });
-    }
+    expect(outcome.ok).toBe(true);
+    expect(outcome.resultText).toContain('作战胜利');
+    expect(appendSpy).toHaveBeenCalledWith(12345n, 'Copilot', expect.objectContaining({ formation: false }));
+    expect(startSpy).toHaveBeenCalled();
+    expect(outcome.logs.some((l) => l.includes('MaaCore Msg'))).toBe(true);
   });
 
   it('runMaaCoreCopilot 任务失败时如实返回失败状态', async () => {
-    const fakeDir = join(tmpdir(), `fake_maa_fail_${Date.now()}`);
-    mkdirSync(join(fakeDir, 'pipeline'), { recursive: true });
+    const { lib } = createMockMaaLib(false);
 
-    const { tasker } = createMockTasker(false);
-    const resource = createMockResource();
+    const outcome = await runMaaCoreCopilot({
+      plan: mockPlan,
+      hwnd: 0x1234,
+      maxSeconds: 5,
+      lib,
+    });
 
-    try {
-      const outcome = await runMaaCoreCopilot({
-        plan: mockPlan,
-        tasker,
-        resource,
-        maaResourceDir: fakeDir,
-      });
-
-      expect(outcome.ok).toBe(false);
-      expect(outcome.resultText).toContain('作战失败或已中断');
-    } finally {
-      rmSync(fakeDir, { recursive: true, force: true });
-    }
+    expect(outcome.ok).toBe(false);
+    expect(outcome.resultText).toContain('作战失败或已中断');
   });
 });

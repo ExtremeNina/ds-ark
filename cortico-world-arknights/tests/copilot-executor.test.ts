@@ -97,4 +97,30 @@ describe('CopilotExecutor 统一执行调度器', () => {
     expect(result.logs.some((l) => l.includes('自动降级'))).toBe(true);
     expect(result.resultText).toContain('作战胜利');
   });
+
+  it('当 engine 为 auto，且 MaaCore 执行报错时，双保险无缝回退到 builtin 解释器打完', async () => {
+    vi.spyOn(maacoreModule, 'isMaaCoreBattleSupported').mockReturnValue(true);
+    vi.spyOn(maacoreModule, 'runMaaCoreCopilot').mockResolvedValue({
+      ok: false,
+      resultText: '启动失败：AsstCreate 创建实例返回 null。',
+      logs: ['MaaCore 启动异常'],
+      durationMs: 200,
+    });
+
+    const cfg: ArknightsConfigSection = {
+      ...ARKNIGHTS_DEFAULTS,
+      copilotEngine: 'auto',
+    };
+
+    const session = createMockSession();
+    const result = await executeCopilotPlan({
+      plan: mockPlan,
+      cfg,
+      session,
+    });
+
+    expect(result.engine).toBe('builtin');
+    expect(result.logs.some((l) => l.includes('原生 MaaCore 执行异常'))).toBe(true);
+    expect(result.resultText).toContain('作战胜利');
+  });
 });

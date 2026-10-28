@@ -25,8 +25,8 @@ export interface ExecuteCopilotContext {
   readonly plan: CopilotPlan;
   readonly cfg: ArknightsConfigSection;
   readonly session: ArknightsSession;
-  readonly tasker: MaaTaskerLike | null;
-  readonly resource: MaaResourceLike | null;
+  readonly tasker?: MaaTaskerLike | null;
+  readonly resource?: MaaResourceLike | null;
   readonly maxSeconds?: number;
   readonly info?: (line: string) => void;
 }
@@ -35,27 +35,27 @@ export interface ExecuteCopilotContext {
  * 统一执行入口
  */
 export async function executeCopilotPlan(ctx: ExecuteCopilotContext): Promise<CopilotExecutionResult> {
-  const { plan, cfg, session, tasker, resource, maxSeconds = 180, info } = ctx;
+  const { plan, cfg, session, maxSeconds = 180, info } = ctx;
   const engine: CopilotEngine = cfg.copilotEngine || 'auto';
-  const maaSupported = isMaaCoreBattleSupported(tasker, resource, cfg.maaResourceDir);
+  const maaSupported = isMaaCoreBattleSupported(cfg.maaResourceDir);
+  const fallbackLogs: string[] = [];
 
   if (engine === 'maacore') {
     if (!maaSupported) {
       return {
         ok: false,
         engine: 'maacore',
-        resultText: '配置为强制 MaaCore 模式，但未检测到有效 MAA 官方资源包。',
+        resultText: '配置为强制 MaaCore 模式，但未检测到有效 MAA 安装目录。',
         logs: [
-          '【错误】已配置强制使用 MaaCore 原生全托管，但未检测到可用的 MAA resource 目录。',
-          '请在配置项 worlds.arknights.maaResourceDir 中指定（如 D:/MAA/resource），或将 copilotEngine 调整为 auto。',
+          '【错误】已配置强制使用 MaaCore 原生全托管，但未检测到可用的 MaaCore.dll。',
+          '请在配置项 worlds.arknights.maaResourceDir 中指定（如 D:/soft/MAA-v6），或将 copilotEngine 调整为 auto。',
         ],
         durationMs: 0,
       };
     }
     const maaOutcome = await runMaaCoreCopilot({
       plan,
-      tasker: tasker!,
-      resource: resource!,
+      hwnd: session.window?.handle,
       maaResourceDir: cfg.maaResourceDir,
       maxSeconds,
       info,
@@ -74,28 +74,31 @@ export async function executeCopilotPlan(ctx: ExecuteCopilotContext): Promise<Co
   if (engine === 'auto' && maaSupported) {
     const maaOutcome = await runMaaCoreCopilot({
       plan,
-      tasker: tasker!,
-      resource: resource!,
+      hwnd: session.window?.handle,
       maaResourceDir: cfg.maaResourceDir,
       maxSeconds,
       info,
     });
-    const shot = await session.screencap();
-    return {
-      ok: maaOutcome.ok,
-      engine: 'maacore',
-      resultText: maaOutcome.resultText,
-      logs: maaOutcome.logs,
-      durationMs: maaOutcome.durationMs,
-      finalShot: shot.ok ? shot.png : null,
-    };
+
+    if (maaOutcome.ok) {
+      const shot = await session.screencap();
+      return {
+        ok: true,
+        engine: 'maacore',
+        resultText: maaOutcome.resultText,
+        logs: maaOutcome.logs,
+        durationMs: maaOutcome.durationMs,
+        finalShot: shot.ok ? shot.png : null,
+      };
+    }
+
+    fallbackLogs.push(`【执行引擎：本地轻量解释器（自动降级）】原生 MaaCore 执行异常（${maaOutcome.resultText}），已无缝切换至内置轻量引擎继续部署。`);
   }
 
   // 降级或指定走本地轻量解释器
-  const fallbackLogs: string[] = [];
-  if (engine === 'auto') {
+  if (engine === 'auto' && fallbackLogs.length === 0) {
     fallbackLogs.push('【执行引擎：本地轻量解释器（自动降级）】未检测到外部 MAA 完整战斗资源包，已使用内置轻量引擎执行。');
-  } else {
+  } else if (engine === 'builtin') {
     fallbackLogs.push('【执行引擎：本地轻量解释器】按配置指定使用内置轻量引擎执行。');
   }
 
