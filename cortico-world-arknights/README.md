@@ -11,12 +11,14 @@ Coopanion（Cortico 框架）的 World 扩展：把国服《明日方舟》PC �
 | `ark_set_paused` | 向配置的暂停按钮位置发一次点击（`true` 暂停 / `false` 继续），默认再补拍一帧作为附件 | 不确认游戏是否真的暂停，只提供点击后的画面供模型自己判断 |
 | `ark_battle_state` | 抓一帧，用包内 PP-OCRv6 模型读出费用、生命值、剩余敌人、暂停横幅、手牌费用，并判断本局是否已结算（胜利/失败），附上同一帧 | 只读，不发任何点击；读不到的项如实列为「没读到」，不当成 0 |
 | `ark_deploy` | 按模型给的 0~1 归一化坐标把手牌拖到地块、再拖出朝向，默认补拍一帧 | 只说「拖拽已发出」，不确认落位成功；不做网格坐标换算 |
+| `ark_enter_stage` | 用内置 pipeline 走到关卡编队页（资源本 / 芯片本 / 主线 / 已收录活动），回执带执行轨迹与理智读数 | 默认不点「开始行动」；不认识或未收录的代号直接拒绝，一次点击都不发 |
+| `ark_open_roguelike` | 用内置 pipeline 走到指定集成战略的主题页 | 只到页面，不点「开始探索」，不开局 |
 | `ark_wait` | 等待指定毫秒（最多 10 秒），用于等费用回复 | 不截图、不点击、不确认任何游戏状态 |
 | `ark_click` | 按 0~1 归一化坐标点一次；可选 `expect`，点完轮询画面里有没有出现某段文字 | 只说「点击已发送」；`expect` 也只报「出现 / 没出现」，不推断这是哪一屏 |
 | `ark_swipe` | 从一点拖到另一点，`repeats` 可连续滚几次（关卡列表用） | 不确认滚动结果 |
 | `ark_ocr` | 抓帧后列出画面里**所有**文字与归一化坐标，用来找按钮 | 只读；默认不附截图，省 token |
 
-扩展本身不做自动战斗，但提供了让模型自己打完一局的工具与剧本（见 `BATTLE_PLAYBOOK.md`）；不做选关、不做 Copilot 作业回退、不实现「代理指挥」。OCR 只在本地跑，模型随包提供；不发任何网络请求。
+扩展本身不做自动战斗，但内置了选关/进集成战略的导航 pipeline，并提供了让模型自己打完一局的工具与剧本（见 `BATTLE_PLAYBOOK.md`）；不做 Copilot 作业回退、不实现「代理指挥」，也不做肉鸽推层。OCR 与 pipeline 都在本地跑，模型随包提供；不发任何网络请求。
 
 ## 安装到 Coopanion（本机目录）
 
@@ -91,7 +93,7 @@ Coopanion（Cortico 框架）的 World 扩展：把国服《明日方舟》PC �
 
 文件名与层级要求与 small 完全相同；换完跑 `pnpm smoke --state`，对比手牌条目数即可。
 
-扩展只调用 `Resource.post_ocr_model()` 与 `Tasker.post_recognition()`，不加载 pipeline、不接管截图与点击。识别结果按**画面区域**归类（顶部条 / 中央横幅 / 右下费用 / 底部手牌），区间常量在 `src/battle/regions.ts`，注释里写了它们来自 1280×720 真机帧的位置。
+扩展的 OCR 只调用 `Resource.post_ocr_model()` 与 `Tasker.post_recognition()`，不接管截图与点击。另有本项目自己编写的导航 pipeline（`assets/resource/pipeline/`），通过 `post_bundle` 加载、`post_task` 执行，见下文「选关与集成战略」。两者共用同一个 Resource/Tasker，OCR 模型只加载一次。识别结果按**画面区域**归类（顶部条 / 中央横幅 / 右下费用 / 底部手牌），区间常量在 `src/battle/regions.ts`，注释里写了它们来自 1280×720 真机帧的位置。
 
 读出来的东西有几条硬规则：
 
@@ -145,7 +147,7 @@ Coopanion（Cortico 框架）的 World 扩展：把国服《明日方舟》PC �
 
 ## 从首页导航到关卡
 
-`ark_ocr` + `ark_click` + `ark_swipe` 让模型能自己走界面：
+`ark_ocr` + `ark_click` + `ark_swipe` 让模型能自己走界面；点名关卡时优先用 `ark_enter_stage`（内置 pipeline），进集成战略用 `ark_open_roguelike`，手动导航保留为兜底：
 
 ```
 首页 → 终端 → 作战 → 选关（不够就滚动） → 编队 → 开始行动
@@ -162,6 +164,17 @@ pnpm smoke --ocr-all                         # 读全屏文字与坐标，不点
 pnpm smoke --click-at "0.42,0.35"            # 按归一化坐标点一次
 pnpm smoke --swipe "0.5,0.8,0.5,0.4,400,3"   # 从下往上滚三次（前四个是坐标与时长，最后是次数）
 ```
+
+## 选关与集成战略
+
+`ark_enter_stage` 和 `ark_open_roguelike` 走的是**本项目自己编写的 MaaFramework pipeline**（`assets/resource/pipeline/`），不是 MAA 的资源包：
+
+- 六个文件：`nav_common`（Ping、编队页确认）、`nav_resource`（CE/LS/CA/AP/SK）、`nav_chip`（PR 芯片本）、`nav_main`（主线）、`nav_side`（别传/插曲/活动骨架）、`nav_roguelike_entry`（集成战略主题页）。
+- 动态文本（关卡代号、章节名、活动关键词、主题名）在 pipeline 里是哨兵（`__STAGE__` 等），由 `src/nav/route.ts` 在调用时用 `pipeline_override` 替换；忘记传时匹配失败而不是误点。
+- ROI 与滑动几何取自 MAA 资源的实测值（快照 2026-10），以 1280×720 为参考系，由 MaaFramework 自动缩放；不复制 MAA 的 JSON 与模板，见「资源边界与获取」。
+- 执行有 60 秒总超时，超时会 `post_stop`；同一时间只允许一个 pipeline 任务。任务结束后抓一帧复核：编队页要读到「开始行动」，主题页要读到「开始探索」，读不到就按失败回执，不替模型下结论。
+- 失败回执包含执行到的节点与当前画面文字，并且**一次点击都没发**。校准顺序：先 `pnpm smoke --ping`，再 `pnpm smoke --enter CE-5`，只调 ROI 不改节点结构。
+- SideStory 只收录了少量活动（`src/nav/side-activities.ts`），新活动要补一行入口关键词与 ROI；主线章节页签名在 `src/nav/chapters.ts`。
 
 ## 让模型自己打完一局
 
@@ -183,6 +196,9 @@ pnpm smoke --swipe "0.5,0.8,0.5,0.4,400,3"   # 从下往上滚三次（前四个
 cd ../test
 corepack pnpm install
 pnpm smoke                                   # 只截图，存 <前缀>-before.png
+pnpm smoke --ping                            # 只跑 NavCommon@Ping，验证 post_bundle/post_task 链路
+pnpm smoke --enter CE-5                      # 内置 pipeline 选关，停在编队页并打印轨迹/理智
+pnpm smoke --roguelike 傀影                 # 导航到集成战略主题页，不点「开始探索」
 pnpm smoke --state                           # 抓帧 + 识别战场数字，打印原始行与结构化结果
 pnpm smoke --watch                           # 只读循环：每 3 秒读一次，认到结算自动退出
 pnpm smoke --auto                            # 一次性战斗测试：固定策略，直到结算，最后打一行汇总
@@ -215,10 +231,10 @@ pnpm smoke --screencap DXGI_DesktopDup       # 换截图方式
 ```bash
 corepack pnpm install   # 装依赖（含 @maaxyz/maa-node 预编译原生包，下载较慢）
 pnpm typecheck          # tsc --noEmit
-pnpm test               # vitest run（76 个用例，不需要游戏，也不加载原生模块）
+pnpm test               # vitest run（166 个用例，不需要游戏，也不加载原生模块）
 ```
 
-测试用假的 maa 模块替掉原生绑定，覆盖坐标换算、窗口匹配、未连接降级、回执形状、区域归类与数字清洗、部署几何、OCR 的加载失败与「没有模型」降级，以及 `tools()` / `describe.json` / `ENV_PROMPT.md` 三者的一致性。
+测试用假的 maa 模块替掉原生绑定，覆盖坐标换算、窗口匹配、未连接降级、回执形状、区域归类与数字清洗、部署几何、OCR 的加载失败与「没有模型」降级、关卡路由与代号归一化、pipeline JSON 的结构校验、pipeline 运行时的 override/超时/停止，以及 `tools()` / `describe.json` / `ENV_PROMPT.md` 三者的一致性。
 
 > `pnpm check:extension` / `pnpm describe:extension` 必须在 **Cortico 仓库根**执行，本包没有克隆整个框架，因此 `describe.json` 是手写并靠测试锁一致性的。如果你本地有 Cortico 检出，建议在发布前跑一次：
 
@@ -293,6 +309,7 @@ pnpm check:extension <本包目录>
 - **导航靠视觉 + 文字识别**：菜单改版、活动入口变化、界面还在加载时，模型会找不到目标——提示词要求它停下来问，而不是连点。一次导航 6~10 步，每步 1~2 秒。
 - **部署会占用真实鼠标，且怕被遮挡**：`AnchoredTouch` 注入的是系统指针事件，注入期间光标被占用、不能同时做别的事；目标点被其他窗口（终端、置顶的桌宠、输入法候选框）盖住时，会以 `occluded` / `contact is not down` / `状态码 4000` 失败。调参见「部署成功率低时怎么调」。
 - **只有最小闭环**：倍速控制、失败计数与 Copilot 作业回退**都没有做**，代理指挥也没有自动化。结算判定只做到「认到结算横幅」这一层：认到就告诉模型可以停，认不到不代表一定还在打。
+- **导航 pipeline 依赖真机校准**：ROI 取自 MAA 手游实测（快照 2026-10），官方 PC 端布局若有偏差会点偏；失败时零点击并回报轨迹与画面，用 `pnpm smoke --ping / --enter / --roguelike` 逐段校准。活动关卡需要按活动补参数，新章节的页签名可能要改 `src/nav/chapters.ts`。
 - **游戏条款**：自动化操作可能违反游戏服务条款，风险由使用者承担。请只在自己的账号上、以不破坏公平性的方式使用。
 - **只支持 Windows**：`package.json` 里 `os` 为 `win32`，其他平台会被拒绝安装。
 
@@ -303,6 +320,17 @@ pnpm check:extension <本包目录>
 - 截图（含 `ark_set_paused` 与 `ark_deploy` 的补拍）只在本机内存里流转一次：作为工具回执的附件交给 Coopanion，由 Coopanion 决定是否发给**你自己配置的模型端点**。也就是说，**画面会进入模型上下文**——如果不希望画面离开本机，请不要接云端模型，或不要调用 `ark_screencap` / `ark_battle_state` 并把 `verifyAfterClick` 关掉。
 - OCR 结果（费用、生命、敌人、手牌费用）会写进回执文本，随同一次请求进入模型上下文；它不是截图，但同样是画面信息的摘要。
 - 日志只记录连接成功与错误原因，不记录截图内容、窗口句柄、用户目录。
+
+## 资源边界与获取
+
+本扩展只提供**代码与自己的 pipeline**：
+
+- 随包发布：`src/`、`assets/resource/pipeline/*.json`（本项目编写）、`assets/resource/model/ocr/`（PP-OCRv6 small，约 20 MB）。
+- **不随包发布**：MAA（MaaAssistantArknights）的 `tasks/`、`template/`、`copilot/`、`roguelike/`、`Arknights-Tile-Pos/`，以及任何游戏截图或 UI 切片。
+- pipeline 里的坐标与关卡数据是从 MAA 资源的实测值重写而来的常量，运行时不读取 MAA 安装目录，也不复制其文件。
+- 以后若启用模板匹配或抄作业回退，需要用户自备资源：把本机 MAA 安装目录填进配置，扩展只读取、不复制、不上传；扩展本身仍然不发网络请求、不自动下载任何文件。
+
+> 扩展上架后，**扩展页 README** 会给出各资源的来源、下载地址、校验方式与安装步骤；本文件只描述运行时行为与边界。
 
 ## 素材与许可
 

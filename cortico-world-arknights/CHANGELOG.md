@@ -1,3 +1,15 @@
+## 0.3.0
+
+- 新增选关与集成战略导航：`ark_enter_stage`（资源本 CE/LS/CA/AP/SK、芯片本 PR、主线、已收录 SideStory）与 `ark_open_roguelike`（集成战略主题页）。工具数从 9 增到 11。
+- 内置本项目自有的 MaaFramework pipeline（`assets/resource/pipeline/`，六个文件）：动态文本用哨兵 + `pipeline_override` 传入；滚动用 `Find` + `Scroll` 自循环与 `max_hit` 限次；不复制 MAA 的 JSON/模板，坐标取自 MAA 实测值（快照 2026-10）。
+- 新增 `src/mfw/runtime.ts`：Resource/Tasker 的唯一持有者，OCR 与 pipeline 共用，20 MB 模型只加载一次；`post_bundle` 缺失时 pipeline 能力降级为可读原因，OCR 不受影响。
+- 新增 `src/mfw/pipeline.ts`：`post_task` 执行入口、60 秒总超时后 `post_stop`、从任务明细还原节点轨迹；同一时间只允许一个任务。
+- `ark_enter_stage` 默认只到编队页并复核「开始行动」；`start: true` 时先解析理智，读不全或不够就一次点击都不发。`ark_open_roguelike` 到主题页即停，不点「开始探索」。
+- 失败回执包含执行轨迹、最后节点与当前画面文字，零点击；`navMaxScrolls` 配置覆盖滚动节点的 `max_hit`。
+- 冒烟脚本新增 `--ping` / `--enter <代号>` / `--roguelike <主题>`，真机校准顺序：Ping → 资源本 → 主线 → 活动 → 主题页，只调 ROI 不改节点结构。
+- 明确资源边界（Agent.md / README / AGENTS.md / assets/README）：仓库只放代码与自有 pipeline，不打包 MAA 的 `tasks/`、`template/`、`copilot/`、`roguelike/`、`Arknights-Tile-Pos/`；OCR 模型继续随包。上架后由扩展页 README 详述资源来源与安装。
+- 测试新增：代号归一化与路由、pipeline JSON 结构校验（节点唯一、next/on_error 存在、禁止 MAA 字段）、假 maa 的 bundle/override/超时/停止，以及两个工具的成功/失败/未连接用例。
+
 ## 0.2.0
 
 - 内置 OCR 模型：`assets/resource/model/ocr/` 携带 PP-OCRv6 small（`det.onnx` / `rec.onnx` / `keys.txt`），npm 包体积随之增大，但不再需要本机装 MAA。

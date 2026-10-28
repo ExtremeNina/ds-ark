@@ -1,6 +1,6 @@
 # 让模型自己打完一局
 
-这份剧本配合 World 的六个工具使用：`ark_connect`、`ark_screencap`、`ark_battle_state`、`ark_deploy`、`ark_set_paused`、`ark_wait`。
+这份剧本配合 World 的工具使用：导航优先 `ark_enter_stage` / `ark_open_roguelike`（内置 pipeline），战斗内用 `ark_connect`、`ark_battle_state`、`ark_deploy`、`ark_set_paused`、`ark_wait`。
 模型在 Coopanion 里按它循环，**不需要任何 API key，也不联网**。
 
 > 只想验收整条链路、不想开 Coopanion 时：用本地冒烟脚本 `pnpm smoke --auto`（固定策略、不调模型、认到结算就停）。这份剧本是给 Coopanion 里的模型看的，`--auto` 用的是它下面的简化版策略。
@@ -13,7 +13,7 @@
 
 ## 从首页走到关卡
 
-进关卡不在战斗循环里，单独走一遍：
+进关卡不在战斗循环里，单独走一遍。用户点名关卡时直接 `ark_enter_stage { stage_code }`（资源本 / 芯片本 / 主线 / 已收录活动），进集成战略用 `ark_open_roguelike { theme }`——两者都只到编队页 / 主题页，不会替你开打；下面的手动导航是兜底：
 
 1. `ark_ocr` 读当前界面，判断自己在首页 / 终端 / 作战 / 关卡列表 / 编队。
 2. 用文字坐标点「终端」→「作战」；目标不在当前列表里就 `ark_swipe` 往上滚，再读一次屏。
