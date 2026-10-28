@@ -53,6 +53,8 @@ export interface MaaResourceLike {
   destroy(): void;
 }
 
+export type MaaTaskerSink = (msg: string, detail: unknown) => void;
+
 /**
  * Tasker：对单张图跑识别（`post_recognition`），以及（可选）执行自有 pipeline。
  *
@@ -65,6 +67,9 @@ export interface MaaTaskerLike {
   post_task?(entry: string, pipelineOverride?: Record<string, unknown> | string): MaaTaskJobLike;
   post_stop?(): MaaJobLike;
   post_recognition(type: string, param: Record<string, unknown>, image: ArrayBuffer): MaaTaskJobLike;
+  add_sink?(sink: MaaTaskerSink): number;
+  remove_sink?(id: number): void;
+  override_pipeline?(key: string, data: Record<string, unknown>): boolean;
   node_detail(id: number): unknown;
   recognition_detail(id: number): unknown;
   destroy(): void;

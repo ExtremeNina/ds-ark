@@ -35,6 +35,9 @@ export const INPUT_METHODS = [
   'AnchoredTouch',
 ] as const;
 
+export const COPILOT_ENGINES = ['auto', 'maacore', 'builtin'] as const;
+export type CopilotEngine = (typeof COPILOT_ENGINES)[number];
+
 /** `config.json` 的 `worlds.arknights` 段。 */
 export interface ArknightsConfigSection {
   enabled: boolean;
@@ -58,6 +61,10 @@ export interface ArknightsConfigSection {
   easyStages: string;
   /** pipeline 里列表/地图最多滑动几次；超过就停下并回报「没找到」。 */
   navMaxScrolls: number;
+  /** 可选：本地已安装的 MAA 官方 resource 目录，用于激活 MaaCore 原生全权托管战斗。 */
+  maaResourceDir: string;
+  /** 战斗 Copilot 执行引擎：auto（优先 MaaCore，缺失自动降级）、maacore（强制全托管）、builtin（强制轻量解释器）。 */
+  copilotEngine: CopilotEngine;
 }
 
 export const ARKNIGHTS_DEFAULTS: ArknightsConfigSection = {
@@ -80,6 +87,8 @@ export const ARKNIGHTS_DEFAULTS: ArknightsConfigSection = {
   easyStages: '',
   // 与 pipeline JSON 里的默认 max_hit 一致；改配置会覆盖到对应滚动节点。
   navMaxScrolls: 6,
+  maaResourceDir: '',
+  copilotEngine: 'auto',
 };
 
 /** 配置组的路径必须全部落在 `worlds.arknights.` 段内，且在 `defaults()` 里有对应项。 */
@@ -192,6 +201,23 @@ export const ARKNIGHTS_CONFIG_GROUP: ConfigGroup = {
           + '路径不对时 ark_battle_state 仍然给图，只是读不出数字。',
         'x-hot': false,
         'x-path': { kind: 'directory' },
+      },
+      'worlds.arknights.maaResourceDir': {
+        type: 'string',
+        title: 'MAA 官方资源目录（可选）',
+        description:
+          '指向本地已安装的 MAA 官方 resource 目录（如 D:/MAA/resource）。'
+          + '配置后可激活 MaaCore 原生全权托管战斗；留空则自动探测常见路径或降级为轻量解释器。',
+        'x-hot': false,
+        'x-path': { kind: 'directory' },
+      },
+      'worlds.arknights.copilotEngine': {
+        type: 'string',
+        title: '战斗执行引擎',
+        description:
+          'auto：优先 MaaCore 原生全权托管，无资源时平滑降级到轻量解释器；maacore：强制原生全托管；builtin：强制本地轻量解释器。',
+        enum: [...COPILOT_ENGINES],
+        'x-hot': true,
       },
     },
   },
