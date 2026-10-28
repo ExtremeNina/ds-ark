@@ -10,6 +10,9 @@
  *   pnpm smoke --auto --auto-attempts 5         每步最多试几个地块（默认 3）
  *   pnpm smoke --auto --auto-time 900           整体时间上限，秒（默认 600）
  *   pnpm smoke --deploy ... --hold 600 --gap 150 --dir 250   临时改部署时序（毫秒），不写进配置
+ *   pnpm smoke --ping                           只跑 NavCommon@Ping，验证 post_bundle/post_task 链路
+ *   pnpm smoke --enter CE-5                     用内置 pipeline 选关，停在编队页并打印轨迹/理智
+ *   pnpm smoke --roguelike 傀影                 导航到集成战略主题页，不点「开始探索」
  *   pnpm smoke --ocr-all                        读全屏文字与坐标（导航用），不点击
  *   pnpm smoke --click-at "0.12,0.90"           按归一化坐标点一次
  *   pnpm smoke --swipe "0.5,0.8,0.5,0.4,400"    从一点拖到另一点（可选时长）
@@ -35,6 +38,9 @@ import { ARKNIGHTS_DEFAULTS, type ArknightsConfigSection } from '../cortico-worl
 import { pausePoint, toPoint } from '../cortico-world-arknights/src/mfw/geometry.ts';
 import { pngSize } from '../cortico-world-arknights/src/mfw/screen.ts';
 import { ArknightsSession } from '../cortico-world-arknights/src/mfw/session.ts';
+import { roguelikeRoute, routeFor } from '../cortico-world-arknights/src/nav/route.ts';
+import { describeSanity, parseSanity } from '../cortico-world-arknights/src/nav/sanity.ts';
+import { describeTrace } from '../cortico-world-arknights/src/nav/trace.ts';
 
 const argv = process.argv.slice(2);
 
@@ -280,6 +286,49 @@ async function runAuto(
   finish(`到达步数上限 ${opts.maxSteps}`);
 }
 
+/**
+ * pipeline 冒烟：打印入口、轨迹、最终画面、OCR 与（选关时）理智。
+ * 返回「pipeline 成功且终点画面命中」；只在真机由用户执行。
+ */
+async function runNav(
+  session: ArknightsSession,
+  cfg: ArknightsConfigSection,
+  entry: string,
+  overrides: Record<string, unknown>,
+  label: string,
+  expect: RegExp,
+  wantSanity: boolean,
+  save: (name: string, png: Uint8Array) => string,
+): Promise<boolean> {
+  const started = Date.now();
+  const result = await session.runPipeline(entry, overrides, cfg.resourceDir);
+  console.log(`[nav] ${label}：入口 ${entry}`);
+  console.log(`[nav] ${result.ok ? '成功' : '失败'}（${Date.now() - started}ms）${result.error ? `：${result.error}` : ''}`);
+  console.log(`[nav] 轨迹：${describeTrace(result.trace)}`);
+
+  const shot = await session.screencap();
+  if (!shot.ok) {
+    console.error(`[nav] 补拍失败：${shot.error}`);
+    return false;
+  }
+  console.log(`[nav] 截图：${save('nav-after', shot.png)}`);
+
+  const ocr = await session.recognizeFrame(shot.png, cfg.resourceDir);
+  if (!ocr.ok) {
+    console.log(`[nav] 识别失败：${ocr.error}`);
+    return result.ok;
+  }
+  const lines = [...ocr.lines].sort((a, b) => a.box.y - b.box.y || a.box.x - b.box.x);
+  console.log(`[nav] 识别到 ${lines.length} 行：`);
+  for (const line of lines.slice(0, 20)) {
+    console.log(`  「${line.text}」 中心 ${line.box.x.toFixed(3)},${line.box.y.toFixed(3)}`);
+  }
+  const hit = lines.some((line) => expect.test(line.text));
+  console.log(`[nav] 终点校验 ${expect}：${hit ? '命中' : '没命中'}；可对照 nav-after.png 判断。`);
+  if (wantSanity) console.log(`[nav] 理智：${describeSanity(parseSanity(lines))}`);
+  return result.ok && hit;
+}
+
 async function main(): Promise<void> {
   const windowArg = take('window');
   const inputArg = take('input');
@@ -316,6 +365,9 @@ async function main(): Promise<void> {
   const holdArg = take('hold');
   const gapArg = take('gap');
   const dirArg = take('dir');
+  const pingArg = take('ping');
+  const enterArg = take('enter');
+  const roguelikeArg = take('roguelike');
 
   if (deployArg !== undefined && typeof deployArg !== 'string') {
     console.error('--deploy 需要 "手牌x,手牌y,地块x,地块y,朝向"，例如 --deploy 0.1,0.9,0.5,0.5,up');
@@ -374,6 +426,61 @@ async function main(): Promise<void> {
   console.log(`窗口：「${connected.window.windowName}」（类名 ${connected.window.className}）`);
   console.log(`控制器报告的尺寸：${reported ? `${reported[0]}×${reported[1]}` : '未报告'}`);
   console.log(`点击换算用的尺寸：${width}×${height}`);
+
+  if (pingArg !== undefined) {
+    const result = await session.runPipeline('NavCommon@Ping', {}, cfg.resourceDir);
+    console.log(`[ping] ${result.ok ? '成功' : '失败'}${result.error ? `：${result.error}` : ''}`);
+    console.log(`[ping] 轨迹：${describeTrace(result.trace)}`);
+    process.exitCode = result.ok ? 0 : 1;
+    await session.stop();
+    return;
+  }
+
+  if (enterArg !== undefined) {
+    if (typeof enterArg !== 'string') {
+      console.error('--enter 需要关卡代号，例如 --enter CE-5');
+      process.exitCode = 2;
+      await session.stop();
+      return;
+    }
+    const planned = routeFor(enterArg, { maxScrolls: cfg.navMaxScrolls });
+    if (!planned.ok) {
+      console.error(`[enter] ${planned.error}`);
+      process.exitCode = 2;
+      await session.stop();
+      return;
+    }
+    const ok = await runNav(
+      session, cfg, planned.route.entry, planned.route.overrides, planned.route.label,
+      /开始行动|代理指挥/, true, save,
+    );
+    if (!ok) process.exitCode = 1;
+    await session.stop();
+    return;
+  }
+
+  if (roguelikeArg !== undefined) {
+    if (typeof roguelikeArg !== 'string') {
+      console.error('--roguelike 需要主题关键词，例如 --roguelike 傀影');
+      process.exitCode = 2;
+      await session.stop();
+      return;
+    }
+    const planned = roguelikeRoute(roguelikeArg, { maxScrolls: cfg.navMaxScrolls });
+    if (!planned.ok) {
+      console.error(`[roguelike] ${planned.error}`);
+      process.exitCode = 2;
+      await session.stop();
+      return;
+    }
+    const ok = await runNav(
+      session, cfg, planned.route.entry, planned.route.overrides, planned.route.label,
+      /开始探索|深入调查/, false, save,
+    );
+    if (!ok) process.exitCode = 1;
+    await session.stop();
+    return;
+  }
 
   if (watchArg !== undefined) {
     const watchMs = typeof watchArg === 'string' ? Number(watchArg) : Number.NaN;
