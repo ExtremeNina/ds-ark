@@ -273,9 +273,8 @@ export const ARKNIGHTS_TOOL_DECLS: ReadonlyArray<ToolSpec> = [
   {
     name: 'ark_find_operators',
     description:
-      'Recognise operator cards on screen (formation screen, operator picker, or roster). '
-      + 'Returns detected operator names with normalised center coordinates (x, y). '
-      + 'If name is provided, searches for that specific operator and optionally scrolls horizontally if not found.',
+      'Recognise operator cards on screen (formation screen, operator picker, or roster ONLY; NOT in battle). '
+      + '识别编队界面或干员名册中的干员，获取干员名字与位置。注意：严禁在战斗中调用此工具识别手牌！战斗开始后一律直接调用 ark_run_copilot 由 MaaCore 原生引擎自动识别人脸下人。',
     tags: ['read'],
     parameters: {
       type: 'object',
@@ -462,7 +461,9 @@ export class ArknightsWorld implements World {
     const list = parseVisibleOperators(ocr.lines);
     if (list.length === 0) {
       return {
-        text: '当前画面未检测到任何已知干员，请确认是否处于编队界面或干员选择名册。',
+        text: '当前画面未检测到任何已知干员，请确认是否处于编队界面或干员选择名册。\n'
+          + '【重要提醒】本工具仅在「编队界面」用于获取队伍 12 人并构思 Copilot plan；严禁在「战斗中」调用本工具识别手牌！'
+          + '战斗中手牌下人完全由 MaaCore 原生引擎（ark_run_copilot）自动识别人脸和费用并部署，进入战斗后请直接调用 ark_run_copilot { plan }。',
         blobs: [frameBlob(currentPng, '干员识别结果')],
       };
     }
@@ -758,6 +759,23 @@ export class ArknightsWorld implements World {
     if (!planned.ok) return fail(planned.error);
     const route = planned.route;
     const fallback = `${route.label}导航后的画面`;
+
+    // 预检：如果当前画面已经停留在编队界面（可见「快捷编队」标志），无需重复跑终端流水线
+    const preShot = await this.session.screencap();
+    if (preShot.ok) {
+      const preOcr = await this.session.recognizeFrame(preShot.png, this.opts.cfg.resourceDir);
+      if (preOcr.ok && preOcr.lines.some((l) => /快捷编队/.test(l.text))) {
+        const sanity = parseSanity(preOcr.lines);
+        const sanityText = describeSanity(sanity);
+        const head = `已到编队界面（当前已就位，无需重复导航）。${sanityText}。`;
+        if (args.start !== true) {
+          return {
+            text: `${head}没有点击「开始行动」——确认要消耗理智后，再调用 ark_click 点它，或传 start: true。`,
+            blobs: [frameBlob(preShot.png, fallback)],
+          };
+        }
+      }
+    }
 
     const run = await this.runNavPipeline(route.entry, route.overrides, route.label);
     if (!run.ok) {

@@ -60,8 +60,8 @@ export const ARKNIGHTS: WorldDefinition<ArknightsConfigSection> = {
         en: 'Captures the frame and lists every recognised text line with normalised boxes; read-only.',
       },
       ark_find_operators: {
-        zh: '识别当前画面（编队界面或干员选择名册）中的干员卡片，返回干员名与坐标；支持按名字检索。',
-        en: 'Recognises operator cards on screen (formation or roster) and returns names with coordinates; supports searching by name.',
+        zh: '识别编队界面或干员名册中的干员卡片（严禁在战斗中调用）；战斗中由 ark_run_copilot 自动识别人脸下干员。',
+        en: 'Recognises operator cards on screen (formation or roster only; do not call during battle).',
       },
       ark_run_copilot: {
         zh: '将 Copilot 战斗计划 JSON（支持作业站作业或根据当前编队自创的战术 plan）交给 MaaCore 原生全权托管执行，自动识别人脸、监控费用下干员、开技能与结算。',
