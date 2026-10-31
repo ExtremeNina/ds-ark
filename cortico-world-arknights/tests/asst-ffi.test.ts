@@ -1,7 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { findMaaCoreDir, loadMaaCoreLib } from '../src/mfw/asst-ffi.ts';
+import { findMaaCoreDir, loadMaaCoreLib, MAA_WIN32_INPUT, MAA_WIN32_SCREENCAP } from '../src/mfw/asst-ffi.ts';
 
 describe('Asst FFI 原生加载器', () => {
+  it('导出的 Win32 输入与截图常量掩码符合 MaaCore 规范', () => {
+    expect(MAA_WIN32_INPUT.SendMessageWithCursorPos).toBe(32n);
+    expect(MAA_WIN32_INPUT.SendMessage).toBe(2n);
+    expect(MAA_WIN32_INPUT.Seize).toBe(1n);
+    expect(MAA_WIN32_SCREENCAP.DXGI_OR_GDI).toBe(18n);
+  });
   it('findMaaCoreDir 能正确探测有效 MAA 安装目录', () => {
     const dir = findMaaCoreDir('D:/soft/MAA-v6');
     expect(dir).toBe('D:/soft/MAA-v6');

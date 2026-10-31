@@ -379,7 +379,7 @@
     },
     {
       "name": "ark_run_copilot",
-      "description": "Execute an MAA Copilot battle plan JSON during battle via native MaaCore engine. 支持从作业站检索的标准作业，也全力支持大模型根据用户当前编队自己构思的部署计划 JSON (actions: [{ type: \"Deploy\", name: \"干员名\", location: [col, row], direction: \"Right\" }])。MaaCore 原生引擎会自动毫秒级监控费用、识别人脸卡牌、吸附地块并自动放技能直至战斗结算。实战中所有战斗一律通过此工具全托管，严禁手动逐个拖拽部署。",
+      "description": "Execute an MAA Copilot battle plan JSON via native MaaCore engine. 最佳调用时机为【编队界面】（包含红色开始行动按钮处），由 MaaCore 自主点击开始行动进入战场并全权接管控费、识别人脸卡牌、吸附地块并放技能直至结算；若已处于战场内，系统会自动由内置轻量引擎接管部署。实战中所有战斗一律通过此工具全托管，严禁手动逐个拖拽部署。",
       "parameters": {
         "type": "object",
         "additionalProperties": false,
@@ -391,6 +391,10 @@
           "maxSeconds": {
             "type": "number",
             "description": "Maximum battle timeout in seconds (default 180, clamp 10-600)."
+          },
+          "async": {
+            "type": "boolean",
+            "description": "Optional: execute battle in background asynchronously (default true). When true, returns immediately so you can comment on the screen and inspect frames with ark_screencap while the engine fights. Battle settlement is pushed as an event."
           }
         },
         "required": [
@@ -435,14 +439,330 @@
         "zh": "检索指定关卡的内置或本地 Copilot 战斗作业；若提供当前编队干员，会自动比对缺漏并给出建议。",
         "en": "Fetches built-in or local Copilot battle plans for a stage, optionally comparing against current team operators."
       }
+    },
+    {
+      "name": "ark_get_stage_map",
+      "description": "Query the static grid and tactical terrain layout of a stage (from MAA official Arknights-Tile-Pos). 获取指定关卡的静态地图网格情报。清晰标明所有地面地块（可部署先锋/近卫/重装）、高台地块（可部署狙击/术师/医疗/辅助）、障碍禁区，以及敌方红门和我方蓝门坐标。在编队界面规划 Copilot 部署 plan 前必须调用，杜绝把狙击放在地面或近卫放在高台的错误。",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "stage_code": {
+            "type": "string",
+            "description": "关卡编号，如 \"1-7\", \"2-10\", \"0-1\" 等。"
+          }
+        },
+        "required": [
+          "stage_code"
+        ]
+      },
+      "tags": [
+        "read"
+      ],
+      "summary": {
+        "zh": "获取指定关卡的静态地图网格情报（来自 MAA 官方地块数据），标明地面（先锋/近卫/重装）、高台（狙击/术师/医疗/辅助）与红蓝门坐标。",
+        "en": "Queries static stage tile layout from MAA data, indicating melee tiles, ranged tiles and spawns."
+      }
+    },
+    {
+      "name": "ark_run_roguelike",
+      "description": "Execute Integrated Strategies (Roguelike / 肉鸽) full exploration via native MaaCore engine. 支持黑流树海 (BlackFlow)、萨卡兹 (Sarkaz)、萨米 (Sami)、水月 (Mizuki)、傀影 (Phantom) 全主题！由底层 MaaCore 自动寻路大地图、选择节点、招募干员、购买藏品并全自动接管局内战斗部署。任务将在后台异步执行，启动后立即返回；探索期间大模型可随时截屏并与博士自由发声互动解说。",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "theme": {
+            "type": "string",
+            "description": "肉鸽主题：BlackFlow (黑流树海), Sarkaz (萨卡兹), Sami (萨米), Mizuki (水月), Phantom (傀影)。默认为 BlackFlow。"
+          },
+          "mode": {
+            "type": "number",
+            "description": "探索模式：0: 常规探索通关(默认), 1: 刷源石锭(存钱模式)。"
+          },
+          "starts_count": {
+            "type": "number",
+            "description": "探索轮数（默认 1）。"
+          },
+          "stop_at_final_stage": {
+            "type": "boolean",
+            "description": "是否在关底 Boss 战前停手并通知博士（便于人机接力打终局），默认 false。"
+          },
+          "investment_withdrawn": {
+            "type": "boolean",
+            "description": "缺钱时是否允许从行商处取款，默认 false。"
+          },
+          "use_assist": {
+            "type": "boolean",
+            "description": "是否借助战干员，默认 false。"
+          },
+          "squad": {
+            "type": "string",
+            "description": "开局分队名称，如「指挥分队」、「突击战术分队」、「蓝图测绘分队」等。"
+          },
+          "roles": {
+            "type": "string",
+            "description": "开局招募职业组合，如「先手必胜」、「攻守兼备」、「取长补短」、「随心所欲」。"
+          },
+          "core_char": {
+            "type": "string",
+            "description": "开局首选核心干员，如「维什戴尔」、「机械师」等。"
+          },
+          "interactive_recruit": {
+            "type": "boolean",
+            "description": "局中遇到招募节点时，是否暂停自动点击交由大模型自主决策（方案A，默认 true）。"
+          },
+          "interactive_squad": {
+            "type": "boolean",
+            "description": "是否在开局分队选择界面暂停，交由大模型自主看屏决策（默认 true）。"
+          },
+          "interactive_route": {
+            "type": "boolean",
+            "description": "是否在大地图路线分支选择时暂停，交由大模型自主规划路线（默认 true）。"
+          }
+        },
+        "required": []
+      },
+      "tags": [
+        "act"
+      ],
+      "summary": {
+        "zh": "启动集成战略（肉鸽）全权托管任务（支持黑流树海 BlackFlow、萨卡兹 Sarkaz、萨米 Sami、水月 Mizuki、傀影 Phantom 全主题），由底层 MaaCore 自动寻路大地图、选节点、招募干员、买藏品并自动打局内战斗。",
+        "en": "Executes Integrated Strategies (Roguelike) full exploration via MaaCore native engine, supporting BlackFlow, Sarkaz, Sami, Mizuki, Phantom themes."
+      }
+    },
+    {
+      "name": "ark_roguelike_strategy",
+      "description": "Query recommended operator recruitment priorities and key relic ratings for a Roguelike theme (from MAA official data). 查询指定肉鸽主题的官方战略秘籍（来自 MAA 官方 recruitment.json 与 shopping.json）。包括核心首发干员、职业进阶优先级与商店高价值藏品。对局前向博士提出战前流派与阵容建议时必查！",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "theme": {
+            "type": "string",
+            "description": "肉鸽主题：BlackFlow (黑流树海), Sarkaz (萨卡兹), Sami (萨米), Mizuki (水月), Phantom (傀影)。默认为 BlackFlow。"
+          }
+        },
+        "required": []
+      },
+      "tags": [
+        "read"
+      ],
+      "summary": {
+        "zh": "查询指定肉鸽主题的官方战略秘籍（来自 MAA 官方 recruitment.json 与 shopping.json），包括核心首发干员、职业进阶优先级与商店高价值藏品。对局前向博士提出战前流派与阵容建议时必查！",
+        "en": "Queries recommended operator recruitment priorities and key relic ratings for a Roguelike theme from MAA official data."
+      }
+    },
+    {
+      "name": "ark_roguelike_select_recruit",
+      "description": "Selects a recruitment ticket or operator during Roguelike recruitment prompt and resumes exploration. 在集成战略（肉鸽）遇到干员招募界面时（收到 arknights.roguelike_recruit_prompt 通知），大模型自主指定职业券、目标干员、卡片序号(slot)或坐标完成招募决策，底层执行点击并恢复全权探索。",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "ticket": {
+            "type": "string",
+            "description": "选中的招募职业券名称（如 先锋 / 近卫 / 狙击 / 重装 / 医疗 / 辅助 / 术师 / 特种）。若已在干员名单界面可不传。"
+          },
+          "operator": {
+            "type": "string",
+            "description": "选中的干员全名（如 锏、维什戴尔、玛恩纳、机械师）。底层会自动 OCR 定位卡片并点击。"
+          },
+          "slot": {
+            "type": "number",
+            "description": "招募干员卡片序号（1~12，从左到右、从上到下按 3列×4行 网格排列）。当 OCR 无法识别艺术字姓名时，强烈建议直接根据画面卡片位置传入 slot 序号！"
+          },
+          "x": {
+            "type": "number",
+            "description": "卡片中心归一化横坐标 x (0.0~1.0)。"
+          },
+          "y": {
+            "type": "number",
+            "description": "卡片中心归一化纵坐标 y (0.0~1.0)。"
+          },
+          "skip": {
+            "type": "boolean",
+            "description": "是否跳过/放弃本次招募。"
+          }
+        },
+        "required": []
+      },
+      "tags": [
+        "act"
+      ],
+      "summary": {
+        "zh": "在集成战略（肉鸽）遇到干员招募界面时（收到 arknights.roguelike_recruit_prompt 通知），大模型自主指定职业券、目标干员、卡片序号(slot)或坐标完成招募决策，底层执行点击并恢复全权探索。",
+        "en": "Selects a recruitment ticket or operator during Roguelike recruitment prompt and resumes exploration."
+      }
+    },
+    {
+      "name": "ark_roguelike_select_squad",
+      "description": "Selects an initial squad or recruit roles composition during Roguelike start and resumes exploration. 在集成战略（肉鸽）开局分队选择界面或招募组合选择界面（收到 arknights.roguelike_squad_prompt 通知），大模型自主选定分队或招募组合（按名称 roles/squad、槽位序号 slot 或归一化坐标 x, y）并恢复全权探索。",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "squad": {
+            "type": "string",
+            "description": "分队名称（如 指挥分队、集群分队、后勤分队、突击战术分队、堡垒战术分队、远程战术分队、破坏战术分队）。底层会自动 OCR 匹配点击。"
+          },
+          "roles": {
+            "type": "string",
+            "description": "开局职业招募组合名称（如 攻守兼备、先手必胜、取长补短、坚不可摧、灵活部署、随心所欲）。底层会自动匹配卡片并点击。"
+          },
+          "slot": {
+            "type": "number",
+            "description": "卡片序号（1~6）。若 OCR 未能识别文字，可直接传序号定位。"
+          },
+          "x": {
+            "type": "number",
+            "description": "目标选项的归一化横坐标 x (0.0~1.0)。"
+          },
+          "y": {
+            "type": "number",
+            "description": "目标选项的归一化纵坐标 y (0.0~1.0)。"
+          }
+        },
+        "required": []
+      },
+      "tags": [
+        "act"
+      ],
+      "summary": {
+        "zh": "在集成战略（肉鸽）开局分队或职业组合选择界面（收到 arknights.roguelike_squad_prompt 通知），大模型自主选定分队或招募组合（按名称 roles/squad、槽位或坐标）并恢复全权探索。",
+        "en": "Selects an initial squad or recruit roles composition during Roguelike start and resumes exploration."
+      }
+    },
+    {
+      "name": "ark_roguelike_select_node",
+      "description": "Selects a route node on the Roguelike map and resumes exploration. 在集成战略（肉鸽）大地图路线规划时（收到 arknights.roguelike_node_prompt 通知），大模型自主选择前进节点（按节点类型文字、分支序号或归一化坐标）并恢复全权探索。",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "target": {
+            "type": "string",
+            "description": "目标节点类型或名称（如 作战、紧急作战、诡意行商、不期而遇、安全的角落、得失、命运所指）。底层会自动匹配节点。"
+          },
+          "index": {
+            "type": "number",
+            "description": "前方分支序号（从上到下或从左到右 1、2、3）。"
+          },
+          "x": {
+            "type": "number",
+            "description": "目标节点的归一化横坐标 x (0.0~1.0)。"
+          },
+          "y": {
+            "type": "number",
+            "description": "目标节点的归一化纵坐标 y (0.0~1.0)。"
+          }
+        },
+        "required": []
+      },
+      "tags": [
+        "act"
+      ],
+      "summary": {
+        "zh": "在集成战略（肉鸽）大地图路线规划时（收到 arknights.roguelike_node_prompt 通知），大模型自主选择前进节点（按节点类型文字、分支序号或坐标）并恢复全权探索。",
+        "en": "Selects a route node on the Roguelike map and resumes exploration."
+      }
+    },
+    {
+      "name": "ark_roguelike_confirm_formation",
+      "description": "Confirm team formation in Roguelike pre-battle and resume MAA AutoBattle. 在集成战略（肉鸽）战前编队界面（收到 arknights.roguelike_formation_prompt 通知），大模型完成出战阵容调整后调用此工具，点击“开始行动”进入战场，由 MAA 原生引擎接管局内战斗自适应部署与技能释放。",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {},
+        "required": []
+      },
+      "tags": [
+        "act"
+      ],
+      "summary": {
+        "zh": "在集成战略（肉鸽）战前编队界面（收到 arknights.roguelike_formation_prompt 通知），大模型完成出战阵容调整后调用此工具，点击“开始行动”进入战场，由 MAA 原生引擎接管局内战斗自适应部署与技能释放。",
+        "en": "Confirms squad formation in Roguelike pre-battle and enters battle, resuming MAA AutoBattle."
+      }
+    },
+    {
+      "name": "ark_stop_roguelike",
+      "description": "Emergency stop for running Roguelike exploration. 紧急终止正在后台运行的集成战略（肉鸽）探索，杀死底层后台子进程，释放所有互斥锁并立即将鼠标与操作控制权归还博士。",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {},
+        "required": []
+      },
+      "tags": [
+        "act"
+      ],
+      "summary": {
+        "zh": "紧急终止正在后台运行的集成战略（肉鸽）探索，杀死底层后台子进程，释放所有互斥锁并立即将鼠标与操作控制权归还博士。",
+        "en": "Emergency stop for running Roguelike exploration, killing subprocess and releasing all locks."
+      }
     }
   ],
   "events": [
     {
       "type": "arknights.ready",
       "description": {
-        "zh": "World 挂载完成，十四个工具可用；此时尚未连接游戏窗口。",
-        "en": "The World was mounted and its fourteen tools are available; the game window is not connected yet."
+        "zh": "World 挂载完成，二十二个工具可用；此时尚未连接游戏窗口。",
+        "en": "The World was mounted and its twenty-two tools are available; the game window is not connected yet."
+      }
+    },
+    {
+      "type": "arknights.battle_settled",
+      "description": {
+        "zh": "Copilot 后台战斗托管执行完毕并结算，向大模型推送最终战报并唤醒进行终局总结。",
+        "en": "Copilot background battle execution finished and settled; pushes outcome report to LLM."
+      }
+    },
+    {
+      "type": "arknights.battle_error",
+      "description": {
+        "zh": "Copilot 后台战斗托管发生异常，通知大模型进行异常处理。",
+        "en": "Copilot background battle execution encountered an error; notifies LLM."
+      }
+    },
+    {
+      "type": "arknights.roguelike_settled",
+      "description": {
+        "zh": "集成战略（肉鸽）探索结束或通关结算，向大模型推送最终收益战报并唤醒进行终局总结。",
+        "en": "Integrated Strategies exploration settled; pushes results to LLM."
+      }
+    },
+    {
+      "type": "arknights.roguelike_ticket_prompt",
+      "description": {
+        "zh": "集成战略掉落或出现职业招募券，底层已暂停自动点击，唤醒大模型根据战术思考并自主挑选职业券。",
+        "en": "Recruitment ticket prompt triggered in Roguelike; pauses automated clicks to let LLM decide ticket."
+      }
+    },
+    {
+      "type": "arknights.roguelike_recruit_prompt",
+      "description": {
+        "zh": "集成战略探索中遇到干员招募界面，底层已暂停自动点击，唤醒大模型看屏思考并自主做出招募决策。",
+        "en": "Operator recruitment prompt triggered in Roguelike; pauses automated clicks to let LLM decide."
+      }
+    },
+    {
+      "type": "arknights.roguelike_squad_prompt",
+      "description": {
+        "zh": "集成战略开局遇到分队选择界面，底层已暂停自动点击，唤醒大模型看屏思考并自主挑选初始分队。",
+        "en": "Initial squad selection prompt triggered in Roguelike; pauses automated clicks to let LLM decide."
+      }
+    },
+    {
+      "type": "arknights.roguelike_formation_prompt",
+      "description": {
+        "zh": "集成战略作战节点前进入战前编队界面，底层已拦截 MAA 快速编队，唤醒大模型精简阵容并调整出战干员。",
+        "en": "Pre-battle formation prompt triggered in Roguelike; pauses automated clicks to let LLM refine team."
+      }
+    },
+    {
+      "type": "arknights.roguelike_node_prompt",
+      "description": {
+        "zh": "集成战略大地图就绪进入路线规划阶段，底层已暂停自动点击，唤醒大模型看屏分析分支并自主决策前进节点。",
+        "en": "Map route node selection prompt triggered in Roguelike; pauses automated clicks to let LLM decide."
       }
     }
   ],
@@ -451,7 +771,7 @@
       "key": "worlds.arknights.envPrompt",
       "title": "明日方舟 · 环境提示词",
       "role": "envPrompt",
-      "content": "明日方舟 PC 客户端是本机一个可以被截屏、被点击的窗口（当前匹配关键字：{{arknights.windowMatch}}）。使用时机与约束：\n\n- 任何操作前先调用一次 ark_connect。它没成功时先确认游戏是否已经启动、窗口标题是否与上面的关键字相符，再决定是否让用户改配置；不要连续重试同一个调用。\n- 需要看画面时才调用 ark_screencap。每次只取当前一帧，不要连拍轮询：连续截图既不会得到更新的战场信息，也会白白占掉上下文。\n- 要让游戏停住或继续时调用 ark_set_paused，传 true 停、传 false 继续。默认情况下回执会附上点击之后抓的一帧，用那张图自己判断有没有真的暂停或继续；World 不做识别，也不替你下结论。回执没有附带图片时（配置里关了补拍、端点不接受图片，或补拍失败），再调用一次 ark_screencap 确认。\n- 点击与拖拽都可能被游戏直接忽略（后台合成消息、权限不对等都会这样）。用户说「没反应」时，先重新截一帧确认当前状态，不要连续重复调用 ark_set_paused 或 ark_deploy；确认没生效就如实说明可能的原因（坐标没校准、输入方式不适用、游戏与桌宠权限不一致），把处理交给用户。\n- 需要数字类战况时调用 ark_battle_state：它抓一帧、读出费用、生命值、剩余敌人、暂停横幅与手牌费用，并把同一帧作为附件给你。它只读取帧，不点任何东西，也不会替你暂停；识别不到的项会在回执里列为「没读到」。识别失败时它照样给图，这时直接用眼睛看（模型随包提供，正常不需要配置 resourceDir）。数字来自本机 OCR，可能有误，和画面对不上就以画面为准，不要向用户断言精确数值。\n- 战斗部署【必须使用 ark_run_copilot 由 MaaCore 全权托管】：严禁在实战中手动调用 ark_deploy 逐个拖拽部署（网络交互与模型推理耗时极长，手动部署必然导致漏怪而惨败）。ark_deploy 仅为底层调试与坐标标定工具；战斗阶段无论是抄作业还是使用用户自己的编队，一律将部署计划组装为 JSON 交给 ark_run_copilot 全权执行。\n- 本版认不出干员名字、职业、关卡名、敌人类型和地块坐标：这些只能从画面里看。不要凭画面里的文字猜数值，也不要声称自己已经知道战场布局。\n- 只操作明日方舟窗口。画面仍是 16:9 时换分辨率不必重新校准，坐标会按比例缩放；换成 16:10、21:9 等比例后暂停坐标不再保证，需要用户按 README 的步骤重新标定 pauseButton（日志里会提示一次「不是 16:9」）。\n\n## 用内置 pipeline 选关\n\n只要用户要求去任意关卡（例如「去 2-10」、「去 1-7」、「打 CE-5」），**必须且直接调用 `ark_enter_stage { stage_code }`，严禁自己手动盲点终端或曲谱**：\n\n- 支持：**所有主线关卡**（如 `0-1`、`1-7`、`2-10`、`3-8` 等任意主线）、资源本（`CE-5` / `LS-5` / `CA-5` / `AP-5` / `SK-5`）、芯片本（`PR-A-1` 等）、已收录的 SideStory（如 `AD-8`）。\n- 它默认只到编队页，**不会点「开始行动」**。回执会给出执行轨迹、最终画面和理智读数；确认理智够、要开打时才传 `start: true`。\n- 回执说「没读到「开始行动」」或「没找到关卡」时，不要连续重调：先看附件画面和轨迹，再用 `ark_ocr` 判断是不是章节/活动不对、关卡未解锁，或者把情况说给用户。\n- 理智读不全时它不会替你开打；这时把读数如实告诉用户，不要猜。\n\n用户想进集成战略时，调用 `ark_open_roguelike { theme }`（`傀影` / `水月` / `萨米` / `萨卡兹` / `界园` / `黑流`）。它只到主题页，**不会点「开始探索」**；要不要开一局由用户决定。\n\npipeline 失败时不会点任何关卡。它给出的轨迹能定位卡在哪一步；需要手动补点时再用下面的 `ark_ocr` + `ark_click`。\n\n## 找按钮、走界面\n\n除了战斗读数，还有三个通用动作：`ark_ocr` 读全屏文字与归一化坐标、`ark_click` 点一个点、`ark_swipe` 从一点拖到另一点。用户说「去打 1-7」这类指令时，按这个循环走：\n\n1. `ark_ocr` 拿当前界面的所有文字与坐标（默认只回文字，省 token）。\n2. 先判断「这是哪一屏」：首页 / 终端 / 作战 / 关卡列表 / 编队 / 战斗中 / 结算。判断不了就停下来问用户，不要猜着点。\n3. 从文字里找目标（如「终端」「作战」「1-7」「开始行动」），用它的**中心坐标**调 `ark_click`（不要用框的左上角）；目标不在当前列表里就用 `ark_swipe` 往上滑，再读一次屏。\n4. 点完再 `ark_ocr` 一次：界面变了才继续；没变说明这一下没生效，先说明情况，不要连点。\n5. 进入战斗后严禁使用 `ark_deploy` 逐个手动拖拽，必须直接调用 `ark_run_copilot` 由 MaaCore 全权托管整场战斗。\n\n同一个目标最多点两次；进入关卡会消耗理智、点「开始行动」会真的开打，执行前先向用户说明。\n\n## 主线的两级导航（重要）\n\n主线关卡（1-7、2-10 这类代号）**不在「曲谱」首页上**，是两级结构：\n\n1. **章节画廊**：终端 → 底部「曲谱」。横向的章节卡（如「黑暗时代」「黑暗时代 PART.2」「为了明日」「昨日海」，以画面实际文字为准）。**每次进入默认停在最新章节**，所以先 `ark_ocr` 读一次屏，确认当前居中的是哪张卡，再决定往哪滑。代号前缀就是章节：`2-10` → 第二章 → 对应章节卡。\n2. **章节地图**：点章节卡 → 剧情页点「前往章节」→ 3D 地图。底部 ◀/▶ 切 EPISODE；地图用**小步长拖拽**平移（起点到终点约 0.1~0.12 宽、400~500ms），**大步长会直接跳到相邻章节**。目标关卡号（如 2-10）只在这一层出现。\n\n护栏：在画廊层**同一目标最多滑两次**，还没看到目标章节卡就停下来向用户说明——你是在错误的层级找它，继续滑只会来回跳；进地图后先确认 EPISODE 编号再平移，别盲滑。\n\n**3D 场景的点击技巧**：章节地图与战场上，普通单次点击常被游戏当成镜头微移而点不开目标。推荐使用 `ark_click { x, y, double: true }`（连击两次）或瞄准关卡名左侧的六边形标志，也可传入 `holdMs: 80` 微长按；若仍被忽略，改用 `ark_swipe` 做 1~2 像素微拖拽。\n- 若进入「曲谱」发现停留在「昨日海」等非预期活动的详情页，先点击左上角返回（0.04, 0.05）重置回篇章卡片列表。\n\n## 战斗执行规范：深度思考、确认方案后方可开打（严禁未经确认直接抢开）\n\n当用户要求打一局、刷关或进入实战时（例如「去打一遍 1-7」、「用当前的编队打一遍 2-10」、「去抄一份作业打」），**必须严格按照以下时序执行，严禁颠倒时序或抢开**：\n\n### 1. 停在编队界面，深度思考阵容（严禁抢点「开始行动」）\n- 选关进入编队界面后，**严禁立刻点击「开始行动」**！编队界面是静态且不扣理智的，这是唯一可以从容思考和配置的时机。\n- 必须首先调用 `ark_find_operators` 读取当前编队携带的干员。\n- 若用户提到「抄作业」、「作业站」或面对陌生复杂关卡，**必须调用 `ark_fetch_copilot { stage, currentTeam }` 联网作业站检索标准作业并完成队伍干员比对**。\n- **优先使用用户当前编队**：未经用户允许，严禁擅自改动用户队伍。若作业中缺少某些干员，必须根据职业定位（如芬↔讯使、克洛丝↔能天使、米格鲁↔蛇屠箱）向用户提出替代方案建议。\n\n### 2. 向用户汇报部署规划并请求确认（严禁不向用户说明就开打）\n- 在编队界面，向用户汇报你的战前思考：\n  1. 关卡敌人路线与地形难点分析；\n  2. 预定部署序列（出怪顺序、先锋产费、高台输出、阻挡重装及朝向）；\n  3. 若缺少作业干员，说明具体的下位替代或队伍调整建议；\n- 询问用户确认（例如：“我已规划好当前编队的 Copilot 部署方案，是否立即点击开始行动？”）。当用户确认同意后再点「开始行动」！\n\n### 3. 进入战斗后全自动 Copilot 执行（严禁战斗内单步手动拖拽，必须走 MaaCore）\n- **进入战斗后第一件事必须是立刻调用 `ark_run_copilot { plan }`**！\n- **严禁在战斗中调用任何识别工具（`ark_find_operators` 或 `ark_ocr`）试图识别手牌**：\n  - `ark_find_operators` 只能在【编队界面】调用一次以获取 12 位干员；\n  - 一旦进入战场，手牌人脸识别与费用监控完全由底层 MaaCore 原生引擎在毫秒级内自动匹配，**不需要也不允许大模型在战斗中扫手牌**！\n  - 战斗中调用识别工具只会白白浪费网络往返与大图传输时间，导致桌宠严重卡顿、进程超时掉线甚至漏怪败北！\n- 点击开始行动进入战场后，**严禁在战斗中手动使用 ark_deploy / ark_set_paused 逐个拖拽部署**。\n- **必须通过 `ark_run_copilot { plan }` 全权托管战斗**：\n  - **若抄作业**：直接将 `ark_fetch_copilot` 检索并确认过的作业 JSON 传给 `ark_run_copilot { plan }`。\n  - **若使用用户自带编队打关（不抄作业/自创打法）**：大模型根据当前 12 位干员自己规划战术，**直接构造一份当前编队的 Copilot plan JSON** 传给 `ark_run_copilot`！例如：\n    ```json\n    {\n      \"stage_name\": \"1-7\",\n      \"actions\": [\n        { \"type\": \"SpeedUp\" },\n        { \"type\": \"Deploy\", \"name\": \"塞雷娅\", \"location\": [6, 3], \"direction\": \"Right\" },\n        { \"type\": \"Deploy\", \"name\": \"凛御银灰\", \"location\": [5, 3], \"direction\": \"Right\" }\n      ]\n    }\n    ```\n    MaaCore 原生引擎接管后，会在毫秒级内自动监控费用、识别干员手牌人脸、精准下人、开技能并开启 2 倍速，直至通关结算！\n  - 无论抄作业还是自创队伍，所有战斗一律由 MaaCore 托管，杜绝任何单步手动拖拽！\n- 作战结束后如实汇报战果（胜利、失败或撤退），杜绝误报。\n\n## 接任务：打哪关、打几局\n\n用户会给一句话，比如「去打一遍 1-7」「随便找几个简单的关卡打」「刷三把 CE-5」。先拆成三件事：打哪几关、打几局、有什么限制（理智、次数）。拆不出来就问一句，不要自己编。\n\n挑关顺序：\n\n1. 用户点名了关卡 → 就打那一关。\n2. 用户没点名 → 优先从推荐清单里挑（配置项 `easyStages`）：{{arknights.easyStages}}。\n3. 清单是「（未配置）」→ 自己按画面挑，但动手前先告诉用户你打算打哪几关。\n\n每一局：\n\n1. 用上一节的方式走到关卡入口（优先调用 `ark_enter_stage` 直接导航进入编队界面）。\n2. 进关卡前确认理智够；不够就停下说明，不要硬进。\n3. **在编队界面驻留思考**：调用 `ark_find_operators` 读取 12 位干员；若抄作业则调用 `ark_fetch_copilot`。向用户汇报阵容替代与部署构想，征求用户同意后方可点「开始行动」。\n4. 进入战斗后直接调用 `ark_run_copilot { plan }` 全自动执行，严禁单步手动拖拽。\n5. 结算后如实认清结果（胜利或撤退失败），杜绝把撤退误报为胜利；点返回，回到关卡入口。\n6. 每局结束用一行汇报：关卡 / 真实结果 / 动作执行状态；全部打完给一个总汇总。\n\n护栏：同一个界面连续两次没变化就停；某一局失败不要自动重来，先问用户；任何消耗理智或资源的操作，执行前说明。\n\n"
+      "content": "明日方舟 PC 客户端是本机一个可以被截屏、被点击的窗口（当前匹配关键字：{{arknights.windowMatch}}）。使用时机与约束：\n\n- 任何操作前先调用一次 ark_connect。它没成功时先确认游戏是否已经启动、窗口标题是否与上面的关键字相符，再决定是否让用户改配置；不要连续重试同一个调用。\n- 需要看画面时才调用 ark_screencap。每次只取当前一帧，不要连拍轮询：连续截图既不会得到更新的战场信息，也会白白占掉上下文。\n- 要让游戏停住或继续时调用 ark_set_paused，传 true 停、传 false 继续。默认情况下回执会附上点击之后抓的一帧，用那张图自己判断有没有真的暂停或继续；World 不做识别，也不替你下结论。回执没有附带图片时（配置里关了补拍、端点不接受图片，或补拍失败），再调用一次 ark_screencap 确认。\n- 点击与拖拽都可能被游戏直接忽略（后台合成消息、权限不对等都会这样）。用户说「没反应」时，先重新截一帧确认当前状态，不要连续重复调用 ark_set_paused 或 ark_deploy；确认没生效就如实说明可能的原因（坐标没校准、输入方式不适用、游戏与桌宠权限不一致），把处理交给用户。\n- 需要数字类战况时调用 ark_battle_state：它抓一帧、读出费用、生命值、剩余敌人、暂停横幅与手牌费用，并把同一帧作为附件给你。它只读取帧，不点任何东西，也不会替你暂停；识别不到的项会在回执里列为「没读到」。识别失败时它照样给图，这时直接用眼睛看（模型随包提供，正常不需要配置 resourceDir）。数字来自本机 OCR，可能有误，和画面对不上就以画面为准，不要向用户断言精确数值。\n- 战斗部署【必须使用 ark_run_copilot 由 MaaCore 全权托管】：严禁在实战中手动调用 ark_deploy 逐个拖拽部署（网络交互与模型推理耗时极长，手动部署必然导致漏怪而惨败）。ark_deploy 仅为底层调试与坐标标定工具；战斗阶段无论是抄作业还是使用用户自己的编队，一律将部署计划组装为 JSON 交给 ark_run_copilot 全权执行。\n- 本版认不出干员名字、职业、关卡名、敌人类型和地块坐标：这些只能从画面里看。不要凭画面里的文字猜数值，也不要声称自己已经知道战场布局。\n- 只操作明日方舟窗口。画面仍是 16:9 时换分辨率不必重新校准，坐标会按比例缩放；换成 16:10、21:9 等比例后暂停坐标不再保证，需要用户按 README 的步骤重新标定 pauseButton（日志里会提示一次「不是 16:9」）。\n\n## 用内置 pipeline 选关\n\n只要用户要求去任意关卡（例如「去 2-10」、「去 1-7」、「打 CE-5」），**必须且直接调用 `ark_enter_stage { stage_code }`，严禁自己手动盲点终端或曲谱**：\n\n- 支持：**所有主线关卡**（如 `0-1`、`1-7`、`2-10`、`3-8` 等任意主线）、资源本（`CE-5` / `LS-5` / `CA-5` / `AP-5` / `SK-5`）、芯片本（`PR-A-1` 等）、已收录的 SideStory（如 `AD-8`）。\n- 它默认只到编队页，**不会点「开始行动」**。回执会给出执行轨迹、最终画面和理智读数；确认理智够、要开打时才传 `start: true`。\n- 回执说「没读到「开始行动」」或「没找到关卡」时，不要连续重调：先看附件画面和轨迹，再用 `ark_ocr` 判断是不是章节/活动不对、关卡未解锁，或者把情况说给用户。\n- 理智读不全时它不会替你开打；这时把读数如实告诉用户，不要猜。\n\n用户想进集成战略时，调用 `ark_open_roguelike { theme }`（`傀影` / `水月` / `萨米` / `萨卡兹` / `界园` / `黑流`）。它只到主题页，**不会点「开始探索」**；要不要开一局由用户决定。\n\npipeline 失败时不会点任何关卡。它给出的轨迹能定位卡在哪一步；需要手动补点时再用下面的 `ark_ocr` + `ark_click`。\n\n## 找按钮、走界面\n\n除了战斗读数，还有三个通用动作：`ark_ocr` 读全屏文字与归一化坐标、`ark_click` 点一个点、`ark_swipe` 从一点拖到另一点。用户说「去打 1-7」这类指令时，按这个循环走：\n\n1. `ark_ocr` 拿当前界面的所有文字与坐标（默认只回文字，省 token）。\n2. 先判断「这是哪一屏」：首页 / 终端 / 作战 / 关卡列表 / 编队 / 战斗中 / 结算。判断不了就停下来问用户，不要猜着点。\n3. 从文字里找目标（如「终端」「作战」「1-7」「开始行动」），用它的**中心坐标**调 `ark_click`（不要用框的左上角）；目标不在当前列表里就用 `ark_swipe` 往上滑，再读一次屏。\n4. 点完再 `ark_ocr` 一次：界面变了才继续；没变说明这一下没生效，先说明情况，不要连点。\n5. 进入战斗后严禁使用 `ark_deploy` 逐个手动拖拽，必须直接调用 `ark_run_copilot` 由 MaaCore 全权托管整场战斗。\n\n同一个目标最多点两次；进入关卡会消耗理智、点「开始行动」会真的开打，执行前先向用户说明。\n\n## 主线的两级导航（重要）\n\n主线关卡（1-7、2-10 这类代号）**不在「曲谱」首页上**，是两级结构：\n\n1. **章节画廊**：终端 → 底部「曲谱」。横向的章节卡（如「黑暗时代」「黑暗时代 PART.2」「为了明日」「昨日海」，以画面实际文字为准）。**每次进入默认停在最新章节**，所以先 `ark_ocr` 读一次屏，确认当前居中的是哪张卡，再决定往哪滑。代号前缀就是章节：`2-10` → 第二章 → 对应章节卡。\n2. **章节地图**：点章节卡 → 剧情页点「前往章节」→ 3D 地图。底部 ◀/▶ 切 EPISODE；地图用**小步长拖拽**平移（起点到终点约 0.1~0.12 宽、400~500ms），**大步长会直接跳到相邻章节**。目标关卡号（如 2-10）只在这一层出现。\n\n护栏：在画廊层**同一目标最多滑两次**，还没看到目标章节卡就停下来向用户说明——你是在错误的层级找它，继续滑只会来回跳；进地图后先确认 EPISODE 编号再平移，别盲滑。\n\n**3D 场景的点击技巧**：章节地图与战场上，普通单次点击常被游戏当成镜头微移而点不开目标。推荐使用 `ark_click { x, y, double: true }`（连击两次）或瞄准关卡名左侧的六边形标志，也可传入 `holdMs: 80` 微长按；若仍被忽略，改用 `ark_swipe` 做 1~2 像素微拖拽。\n- 若进入「曲谱」发现停留在「昨日海」等非预期活动的详情页，先点击左上角返回（0.04, 0.05）重置回篇章卡片列表。\n\n## 战斗执行规范：深度思考、确认方案后方可开打（严禁未经确认直接抢开）\n\n当用户要求打一局、刷关或进入实战时（例如「去打一遍 1-7」、「用当前的编队打一遍 2-10」、「去抄一份作业打」），**必须严格按照以下时序执行，严禁颠倒时序或抢开**：\n\n### 1. 停在编队界面，深度思考阵容（严禁抢点「开始行动」）\n- 选关进入编队界面后，**严禁立刻点击「开始行动」**！编队界面是静态且不扣理智的，这是唯一可以从容思考和配置的时机。\n- **必须核验并默认切回【第一编队（T1）】**：\n  * 游戏客户端常会记忆并停留在上一次使用过的非默认编队（例如第四编队）；\n  * 进入编队页时，先检查当前画面底部的编队标签。若当前未选中第一编队（T1），必须先调用 `ark_click { x: 0.188, y: 0.961 }`（或通过文字匹配「第一编队」/「编队 1」标签）切回第一编队，杜绝误用其他队伍出战！\n- **必须调用 `ark_find_operators` 读取当前编队携带的 12 位干员**：\n  * 工具会自动从官方数据库补充每名干员的【职业 | 站位(地面/高台) | 星级】（如 `乌尔比安【近卫 | 站位:地面 | 6星】`、`娜仁图亚【狙击 | 站位:高台 | 6星】`），认清全队职业与高低台分工，杜绝常识幻觉！\n- **必须调用 `ark_get_stage_map { stage_code }` 查阅关卡静态战术地图**：\n  * 获取关卡网格全貌，识别敌方红门（S）、我方蓝门（E）、所有可用地面坐标（M）与高台坐标（R）；\n  * 严禁将高台狙击/术师/医疗/辅助下在地面 M 格，严禁将地面先锋/近卫/重装下在高台 R 格！底层已内置防呆校验，非法放置将被前置拦截。\n- 若用户提到「抄作业」、「作业站」或面对陌生复杂关卡，**必须调用 `ark_fetch_copilot { stage, currentTeam }` 联网作业站检索标准作业并完成队伍干员比对**。\n- **优先使用用户当前编队**：未经用户允许，严禁擅自改动用户队伍。若作业中缺少某些干员，必须根据职业定位（如芬↔讯使、克洛丝↔能天使、米格鲁↔蛇屠箱）向用户提出替代方案建议。\n\n### 2. 《明日方舟》通用部署战术思考体系与 Copilot Plan 规范\n大模型在自主规划编队作战方案并生成 Copilot plan JSON 时，**必须严格基于以下通用部署战术思考模型**：\n- **战术本质**：围绕“费用、地形与阻挡”做动态取舍，最终以最低费用和最优站位形成“输出—阻挡—治疗”的稳定循环。\n- **经典部署次序**：\n  1. **开局产费**：开局优先部署先锋干员（如乌尔比安、德克萨斯、风笛、讯使等低费地面干员），迅速阻挡初波敌人并赚取部署费用；\n  2. **逐步建立防线**：严格按「先锋 → 狙击/医疗 → 术师/近卫 → 重装」的顺序逐步建立稳固防线。\n- **高低台地形分工**：\n  * **地面地块**：部署先锋、近卫、重装负责阻挡怪群，利用阻挡数（1~3阻挡）控制怪物流动速度；\n  * **高台地块**：部署狙击、术师、医疗、辅助负责持续远程火力输出与防线生命维持。\n- **朝向决策与火力/治疗覆盖**：\n  * 必须根据敌人路径选择朝向（Left / Right / Up / Down）；\n  * 让高台狙击/术师火力主覆盖核心阻挡格与关键交叉路口；\n  * 医疗干员朝向必须覆盖到核心阻挡位上的重装与近卫，确保主力防线不倒下。\n- **控怪与进阶技巧（防漏怪与挤人）**：\n  * **利用阻挡数控怪**：防止主T阻挡上限满后漏怪，必要时在主T前后一格补位副阻挡；\n  * **“挤人”技巧**：必要时在同一通道连续两格部署双近战形成交叉夹击火力，或通过后下干员将危险格上的残血怪卡入更稳固的火力交织区；\n  * **一次性组装完整 JSON**：将上述从先锋开局、输出铺开、重装接怪到医疗保T的完整操作全部一次性组装在单个 `plan.actions` 序列中！\n\n### 3. 向用户汇报部署规划并请求确认（严禁不向用户说明就开打）\n- 在编队界面，向用户汇报你的战前思考：\n  1. 关卡敌人路线与地形难点分析；\n  2. 预定部署序列（出怪顺序、先锋产费、高台输出、阻挡重装及朝向）；\n  3. 若缺少作业干员，说明具体的下位替代或队伍调整建议；\n- 询问用户确认（例如：“我已规划好当前编队的 Copilot 部署方案，是否立即执行？”）。当用户确认同意后，**直接在编队界面调用 `ark_run_copilot { plan }`**！严禁大模型自己手动去点「开始行动」抢开！\n\n### 4. 在编队界面直接调用 `ark_run_copilot { plan }` 全权托管战斗\n- **必须在【编队界面】直接调用 `ark_run_copilot { plan }`**！\n  - MaaCore 原生全权托管引擎的官方入口正是编队界面的【开始行动】按钮。由 MaaCore 自动识别并点击「开始行动」进入战场并全权接管部署；\n  - **运行期间保持游戏窗口正常显示**：切勿将游戏窗口最小化到任务栏（最小化会导致 Windows 物理坐标塌陷为负数，使任何点击与拖拽全部失效）；\n  - **MaaCore 退出机制认知**：\n    * 若在战内调用 MaaCore，其找不到编队开始按钮，会在约 7~8 秒自退（并非缺少关卡数据，底层调度器会自动切至轻量引擎接管）；\n    * 若在编队页点击后未能成功进战，MaaCore 可能会等待进战超时（约 70 秒），底层调度器已内置安全状态守卫，会尝试补点进战并在失败时安全中止，杜绝在编队界面误触卡槽；\n  - **严禁在大模型端手动点击「开始行动」提前进入战斗**（正常情况下交由 Copilot 引擎自动触发进战与部署）。\n- **【核心禁令】严禁在战斗过程中提交任何写指令或重复提交 JSON！**：\n  - 战斗部署必须一气呵成！所有部署规划必须在【编队界面】一次性生成并传递给 `ark_run_copilot`；\n  - **战斗一旦打响，严禁在战斗中途再次调用 `ark_run_copilot` 或手动下发 `ark_click`/`ark_deploy`**！底层已施加安全互斥锁，托管期间所有破坏性写指令都会被自动拦截；\n  - **战中积极互动契约（心里话 / 吐槽 / 战况解说 / 闲聊）**：`ark_run_copilot` 启动后 1 秒内立即返回控制权，大模型拥有完全自由的发声与读屏能力！在战斗托管进行期间，**必须每隔 5~10 秒调用一次 `ark_screencap` 看看屏幕，且每次看屏后必须立即调用 `pet_say` 和博士说话互动**（内容完全自由，可以是战况解说、对干员/怪物的吐槽、自言自语碎碎念、或关心博士的闲聊；严禁只默默截图发呆不说话！）；\n  - **忽视加载界面小字提示**：加载界面中出现的演习模式等浮动背景小字仅为游戏常规贴士，切勿纠结怀疑，专注于战场画面与陪伴博士；\n  - **终局事件推送通知**：战斗结算后系统会自动推送 `arknights.battle_settled` 事件唤醒大模型，届时向博士做最终战报总结汇报！\n- **严禁在战斗中调用任何识别工具（`ark_find_operators` 或 `ark_ocr`）试图识别手牌**：\n  - `ark_find_operators` 只能在【编队界面】调用一次以获取 12 位干员；\n  - 一旦进入战场，手牌人脸识别与费用监控完全由底层 MaaCore 原生引擎在毫秒级内自动匹配，**不需要也不允许大模型在战斗中扫手牌**！\n  - 战斗中调用识别工具只会白白浪费网络往返与大图传输时间，导致桌宠严重卡顿、进程超时掉线甚至漏怪败北！\n- **必须通过 `ark_run_copilot { plan }` 全权托管战斗**：\n  - **若抄作业**：直接将 `ark_fetch_copilot` 检索并确认过的作业 JSON 传给 `ark_run_copilot { plan }`。\n  - **若使用用户自带编队打关（不抄作业/自创打法）**：大模型根据当前 12 位干员自己规划战术，**直接构造一份当前编队的 Copilot plan JSON** 传给 `ark_run_copilot`！例如 1-7 定型方案：\n    ```json\n    {\n      \"stage_name\": \"1-7\",\n      \"actions\": [\n        { \"type\": \"SpeedUp\" },\n        { \"type\": \"Deploy\", \"name\": \"凛御银灰\", \"location\": [1, 3], \"direction\": \"Right\", \"costs\": 12 },\n        { \"type\": \"Skill\", \"name\": \"凛御银灰\", \"location\": [1, 3], \"pre_delay\": 5000 },\n        { \"type\": \"Deploy\", \"name\": \"娜仁图亚\", \"location\": [1, 2], \"direction\": \"Right\", \"costs\": 19 },\n        { \"type\": \"Skill\", \"name\": \"娜仁图亚\", \"location\": [1, 2], \"pre_delay\": 3000 }\n      ]\n    }\n    ```\n    MaaCore 原生引擎接管后，会在毫秒级内自动监控费用、识别干员手牌人脸、精准下人、开技能并开启 2 倍速，直至通关结算！\n  - 无论抄作业还是自创队伍，所有战斗一律由 MaaCore 托管，杜绝任何单步手动拖拽！\n- 作战结束后如实汇报战果（胜利、失败或撤退），杜绝误报。\n\n## 集成战略（肉鸽）作战与互动指引\n\n当博士要求打集成战略（例如“打一把黑流树海 / 萨卡兹肉鸽 / 萨米”）时，按以下时序进行：\n\n1. **对局前（战前参谋与开局定制）**：\n   - 绝不盲目开打！先调用 `ark_roguelike_strategy { theme }` 查阅该主题官方秘籍（支持黑流树海 `BlackFlow`、萨卡兹 `Sarkaz`、萨米 `Sami`、水月 `Mizuki`、傀影 `Phantom`），包括推荐分队、职业组合与核心首选干员；\n   - 主动通过 `pet_say` 向博士提出**战前策略建议**（例如：“博士！黑流树海建议首选【突击战术分队+先手必胜+维什戴尔】，背包优先清理低阶废料。博士觉得如何？有偏好的干员和分队告诉我哦~”）；\n   - 征求博士意见或得到确认后，将确定的 `squad`（分队）、`roles`（职业组）和 `core_char`（核心干员）填入参数，调用 `ark_run_roguelike { theme, squad, roles, core_char, interactive_squad: true, interactive_recruit: true, interactive_route: true }` 启动探索。\n2. **对局中（大模型全权决策 + 战中积极互动解说 + 紧急停止后备）**：\n   - **大模型决策权一：开局分队选择（收到 `arknights.roguelike_squad_prompt`）**：\n     * 系统暂停自动点击，大模型调用 `ark_screencap` 审视分队选项，通过 `pet_say` 汇报你的分队决策思路；\n     * 调用 `ark_roguelike_select_squad({ squad, slot, x, y })` 自动选中分队并继续。\n   - **大模型决策权二：局中干员招募（收到 `arknights.roguelike_recruit_prompt`）**：\n     * 系统暂停自动点击，大模型调用 `ark_screencap` 查看可选职业券与 12 格干员列表；\n     * 结合队伍短板与剩余希望推演，通过 `pet_say` 向博士汇报选人原因；\n     * 调用 `ark_roguelike_select_recruit({ ticket, operator, slot, x, y })` 完成招募（注：若 OCR 未能识别小字体艺术字干员名，请直接传入 `slot: 1~12` 卡片网格序号或 `x, y` 坐标，绝对精准命中！）。\n   - **大模型决策权三：大地图路线规划（收到 `arknights.roguelike_node_prompt`）**：\n     * 系统在进入大地图节点规划时暂停，大模型调用 `ark_screencap` 观察分支与安全区/行商/战斗；\n     * 通过 `pet_say` 向博士分析战术路线，调用 `ark_roguelike_select_node({ target, index, x, y })` 选定前进路线！\n   - **大模型长效陪伴契约**：每隔 15~30 秒调用 `ark_screencap` 看看屏幕，且每次看屏后必须立刻调用 `pet_say` 和博士说话互动（内容完全自由，可吐槽奇奇怪怪的藏品、自言自语碎碎念、或关心博士的日常）；\n   - **紧急停止与交还控制权（`ark_stop_roguelike`）**：\n     * 若探索中途卡住、画面无响应或博士要求停止时，直接调用 `ark_stop_roguelike`；\n     * 底层会立刻杀死后台子进程，释放全部互斥锁，将游戏与鼠标控制权瞬间无损交还博士！\n3. **探索结算**：\n   - 探索整轮结束或通关时，系统会自动推送 `arknights.roguelike_settled` 事件唤醒大模型，届时向博士做终局收获总结！\n\n## 接任务：打哪关、打几局\n\n用户会给一句话，比如「去打一遍 1-7」「随便找几个简单的关卡打」「刷三把 CE-5」。先拆成三件事：打哪几关、打几局、有什么限制（理智、次数）。拆不出来就问一句，不要自己编。\n\n挑关顺序：\n\n1. 用户点名了关卡 → 就打那一关。\n2. 用户没点名 → 优先从推荐清单里挑（配置项 `easyStages`）：{{arknights.easyStages}}。\n3. 清单是「（未配置）」→ 自己按画面挑，但动手前先告诉用户你打算打哪几关。\n\n每一局：\n\n1. 用上一节的方式走到关卡入口（优先调用 `ark_enter_stage` 直接导航进入编队界面）。\n2. 进关卡前确认理智够；不够就停下说明，不要硬进。\n3. **在编队界面驻留思考**：调用 `ark_find_operators` 读取 12 位干员；若抄作业则调用 `ark_fetch_copilot`。向用户汇报阵容替代与部署构想，征求用户同意后直接调用 `ark_run_copilot { plan }` 执行，严禁自己手动点击「开始行动」。\n4. 战毕结算后如实认清结果（胜利或撤退失败），杜绝把撤退误报为胜利；点返回，回到关卡入口。\n5. 每局结束用一行汇报：关卡 / 真实结果 / 动作执行状态；全部打完给一个总汇总。\n\n护栏：同一个界面连续两次没变化就停；某一局失败不要自动重来，先问用户；任何消耗理智或资源的操作，执行前说明。\n\n"
     }
   ]
 }

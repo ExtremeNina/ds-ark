@@ -1,16 +1,39 @@
 import { describe, expect, it } from 'vitest';
-import { getStageDimension, tileToScreen } from '../src/battle/tile-pos.ts';
+import { getStageDimension, loadStageMapInfo, tileToScreen } from '../src/battle/tile-pos.ts';
 
 describe('tile-pos 地块换算', () => {
   it('正确获取已知内置关卡尺寸', () => {
     const dim17 = getStageDimension('1-7');
-    expect(dim17).toEqual({ width: 10, height: 7 });
+    expect(dim17).toEqual({ width: 11, height: 7 });
 
     const dim210 = getStageDimension('2-10');
     expect(dim210).toEqual({ width: 11, height: 8 });
 
     const unknown = getStageDimension('unknown-stage');
     expect(unknown).toEqual({ width: 11, height: 8 });
+  });
+
+  it('能成功解析 1-7 的静态地图地块与高低台分布', () => {
+    const mapInfo = loadStageMapInfo('1-7', 'D:/soft/MAA-v6/resource');
+    expect(mapInfo).not.toBeNull();
+    expect(mapInfo?.code).toBe('1-7');
+    expect(mapInfo?.width).toBe(11);
+    expect(mapInfo?.height).toBe(7);
+
+    // 验证高台与地面列表包含预期的点位
+    expect(mapInfo?.meleeTiles.length).toBeGreaterThan(0);
+    expect(mapInfo?.rangedTiles.length).toBeGreaterThan(0);
+    // [3, 2] 应在地面列表中
+    const hasRoadAt32 = mapInfo?.meleeTiles.some(([c, r]) => c === 3 && r === 2);
+    expect(hasRoadAt32).toBe(true);
+    // [1, 1] 应在高台列表中
+    const hasWallAt11 = mapInfo?.rangedTiles.some(([c, r]) => c === 1 && r === 1);
+    expect(hasWallAt11).toBe(true);
+
+    // 验证 ASCII 战术缩略图
+    expect(mapInfo?.asciiGrid).toContain('R01:');
+    expect(mapInfo?.asciiGrid).toContain(' M');
+    expect(mapInfo?.asciiGrid).toContain(' R');
   });
 
   it('网格坐标正确映射到屏幕有效区域', () => {

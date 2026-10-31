@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -20,6 +20,8 @@ import type {
   MaaTaskJobLike,
 } from '../src/mfw/native.ts';
 import { FakeHost } from './helpers/fake-host.ts';
+import type { CopilotPlan } from '../src/battle/copilot.ts';
+import * as roguelikeExecutor from '../src/battle/roguelike-executor.ts';
 
 const PACKAGE_DIR = fileURLToPath(new URL('..', import.meta.url));
 
@@ -1079,5 +1081,403 @@ describe('明日方舟 World', () => {
     expect(stage.text).toContain('ark_connect');
     expect(theme.failed).toBe(true);
     expect(theme.text).toContain('ark_connect');
+  });
+
+  it('ark_get_stage_map：成功查询关卡静态战术地图与高低台坐标', async () => {
+    const { world } = newWorld();
+    const outcome = receipt(await toolOf(world, 'ark_get_stage_map').handler({ stage_code: '1-7' }, call));
+    expect(outcome.failed).toBeUndefined();
+    expect(outcome.text).toContain('1-7');
+    expect(outcome.text).toContain('暴君');
+    expect(outcome.text).toContain('地面候选坐标:');
+    expect(outcome.text).toContain('高台候选坐标:');
+    expect(outcome.text).toContain('严禁把高台干员');
+  });
+
+  it('ark_run_copilot：支持 async 异步模式，启动后立即返回回执并在战斗期间实施写操作拦截', async () => {
+    const { world } = newWorld();
+    const host = new FakeHost();
+    await world.start(host);
+
+    // 模拟连接与获得画面尺寸
+    await toolOf(world, 'ark_connect').handler({}, call);
+    await toolOf(world, 'ark_screencap').handler({}, call);
+
+    const plan = {
+      stage_name: '1-7',
+      actions: [
+        { type: 'SpeedUp' },
+      ],
+    };
+
+    // 1. 异步启动 ark_run_copilot
+    const launchOutcome = receipt(await toolOf(world, 'ark_run_copilot').handler({ plan, async: true }, call));
+    expect(launchOutcome.failed).toBeUndefined();
+    expect(launchOutcome.text).toContain('【Copilot 全权托管已在后台启动】');
+    expect(launchOutcome.text).toContain('1-7');
+
+    // 2. 战中写操作互斥拦截
+    const clickOutcome = receipt(await toolOf(world, 'ark_click').handler({ x: 0.5, y: 0.5 }, call));
+    expect(clickOutcome.failed).toBe(true);
+    expect(clickOutcome.text).toContain('【操作拦截】当前关卡「1-7」正在后台全权托管中');
+
+    const deployOutcome = receipt(await toolOf(world, 'ark_deploy').handler({
+      card: { x: 0.5, y: 0.5 },
+      tile: { x: 0.5, y: 0.5 },
+      direction: 'right',
+    }, call));
+    expect(deployOutcome.failed).toBe(true);
+    expect(deployOutcome.text).toContain('【操作拦截】');
+
+    const pauseOutcome = receipt(await toolOf(world, 'ark_set_paused').handler({ paused: true }, call));
+    expect(pauseOutcome.failed).toBe(true);
+    expect(pauseOutcome.text).toContain('【操作拦截】');
+
+    // 3. 只读工具正常放行（大模型解说看屏能力）
+    const capOutcome = receipt(await toolOf(world, 'ark_screencap').handler({}, call));
+    expect(capOutcome.failed).toBeUndefined();
+
+    // 4. 等待后台异步任务结束并验证事件推送
+    let retries = 0;
+    while (!host.events.some((e) => e.type === 'arknights.battle_settled' || e.type === 'arknights.battle_error') && retries < 100) {
+      await new Promise((r) => setTimeout(r, 50));
+      retries++;
+    }
+
+    const settledEvent = host.events.find((e) => e.type === 'arknights.battle_settled');
+    expect(settledEvent).toBeDefined();
+    expect(settledEvent?.text).toContain('战斗已结算');
+
+    // 5. 战斗结束后互斥锁已释放
+    const afterClickOutcome = receipt(await toolOf(world, 'ark_click').handler({ x: 0.5, y: 0.5 }, call));
+    expect(afterClickOutcome.text).not.toContain('【操作拦截】');
+
+    await world.stop();
+  });
+
+  it('ark_run_copilot：针对 1-7 关卡自动补齐银灰 5s 开技能与娜仁图亚 3s 开技能防呆时序', async () => {
+    const { world } = newWorld();
+    await toolOf(world, 'ark_connect').handler({}, call);
+    await toolOf(world, 'ark_screencap').handler({}, call);
+
+    const incompletePlan: CopilotPlan = {
+      stage_name: '1-7',
+      actions: [
+        { type: 'SpeedUp' },
+        { type: 'Deploy', name: '凛御银灰', location: [1, 3], direction: 'Right', costs: 12 },
+        { type: 'Skill', name: '凛御银灰', location: [1, 3] }, // 缺少 pre_delay
+        { type: 'Deploy', name: '娜仁图亚', location: [1, 2], direction: 'Right', costs: 19 }, // 缺少娜仁图亚后续技能
+      ],
+    };
+
+    // 执行异步启动（内部会进行 plan 引用增强）
+    await toolOf(world, 'ark_run_copilot').handler({ plan: incompletePlan, async: true }, call);
+
+    const silverAshSkill = incompletePlan.actions.find((a) => a.type === 'Skill' && a.name === '凛御银灰');
+    expect(silverAshSkill?.pre_delay).toBe(5000);
+
+    const narentuyaSkill = incompletePlan.actions.find((a) => a.type === 'Skill' && a.name === '娜仁图亚');
+    expect(narentuyaSkill).toBeDefined();
+    expect(narentuyaSkill?.location).toEqual([1, 2]);
+    expect(narentuyaSkill?.pre_delay).toBe(3000);
+  });
+
+  it('ark_roguelike_strategy：能够成功查询黑流树海及其他肉鸽主题的战略秘籍', async () => {
+    const { world } = newWorld();
+
+    // 1. 查询黑流树海
+    const blackflowOutcome = receipt(await toolOf(world, 'ark_roguelike_strategy').handler({ theme: '黑流树海' }, call));
+    expect(blackflowOutcome.failed).toBeUndefined();
+    expect(blackflowOutcome.text).toContain('黑流树海');
+    expect(blackflowOutcome.text).toContain('核心推荐首发干员');
+    expect(blackflowOutcome.text).toContain('博士，开打前你可以向我提出偏好的干员');
+
+    // 2. 默认参数亦为黑流树海
+    const defaultOutcome = receipt(await toolOf(world, 'ark_roguelike_strategy').handler({}, call));
+    expect(defaultOutcome.failed).toBeUndefined();
+    expect(defaultOutcome.text).toContain('黑流树海');
+
+    // 3. 查询萨卡兹
+    const sarkazOutcome = receipt(await toolOf(world, 'ark_roguelike_strategy').handler({ theme: 'Sarkaz' }, call));
+    expect(sarkazOutcome.failed).toBeUndefined();
+    expect(sarkazOutcome.text).toContain('萨卡兹的无终奇语');
+  });
+
+  it('ark_run_roguelike：启动异步全权探索、施加写操作互斥锁、允许看屏并在结束时推送结算事件', async () => {
+    const { world } = newWorld();
+    const host = new FakeHost();
+    await world.start(host);
+
+    // 模拟连接与获得画面尺寸
+    await toolOf(world, 'ark_connect').handler({}, call);
+    await toolOf(world, 'ark_screencap').handler({}, call);
+
+    // Mock executeRoguelike 模拟耗时探索与战报返回
+    const execSpy = vi.spyOn(roguelikeExecutor, 'executeRoguelike').mockImplementation(async () => {
+      await new Promise((r) => setTimeout(r, 80));
+      return {
+        ok: true,
+        resultText: '集成战略【BlackFlow】执行完成，已抵达第5层',
+        logs: [
+          '[MaaCore] 启动黑流树海',
+          '[MaaCore] 成功招募核心干员机械师',
+          '[MaaCore] 购买战略藏品',
+          '[MaaCore] 顺利通过紧急作战',
+          '[MaaCore] 探索圆满结算',
+        ],
+        durationMs: 80000,
+      };
+    });
+
+    // 1. 异步启动肉鸽探索（支持开局定制分队、职业组合与核心干员）
+    const launchOutcome = receipt(
+      await toolOf(world, 'ark_run_roguelike').handler({
+        theme: '黑流树海',
+        mode: 0,
+        starts_count: 1,
+        squad: '突击战术分队',
+        roles: '先手必胜',
+        core_char: '维什戴尔',
+      }, call),
+    );
+    expect(launchOutcome.failed).toBeUndefined();
+    expect(launchOutcome.text).toContain('【集成战略全权托管已在后台启动】');
+    expect(launchOutcome.text).toContain('主题「BlackFlow」已启动');
+    expect(launchOutcome.text).toContain('常规探索通关模式');
+    expect(launchOutcome.text).toContain('分队【突击战术分队】');
+    expect(launchOutcome.text).toContain('职业组合【先手必胜】');
+    expect(launchOutcome.text).toContain('核心干员【维什戴尔】');
+
+    // 2. 探索运行中，写操作被安全互斥拦截
+    const clickOutcome = receipt(await toolOf(world, 'ark_click').handler({ x: 0.5, y: 0.5 }, call));
+    expect(clickOutcome.failed).toBe(true);
+    expect(clickOutcome.text).toContain('【操作拦截】当前肉鸽主题「BlackFlow」正在后台全权托管中');
+
+    const deployOutcome = receipt(await toolOf(world, 'ark_deploy').handler({
+      card: { x: 0.5, y: 0.5 },
+      tile: { x: 0.5, y: 0.5 },
+      direction: 'right',
+    }, call));
+    expect(deployOutcome.failed).toBe(true);
+    expect(deployOutcome.text).toContain('【操作拦截】');
+
+    const pauseOutcome = receipt(await toolOf(world, 'ark_set_paused').handler({ paused: true }, call));
+    expect(pauseOutcome.failed).toBe(true);
+    expect(pauseOutcome.text).toContain('【操作拦截】');
+
+    // 3. 只读工具正常放行（大模型看屏互动解说）
+    const capOutcome = receipt(await toolOf(world, 'ark_screencap').handler({}, call));
+    expect(capOutcome.failed).toBeUndefined();
+
+    // 4. 等待后台探索完成并验证事件推送
+    let retries = 0;
+    while (!host.events.some((e) => e.type === 'arknights.roguelike_settled') && retries < 100) {
+      await new Promise((r) => setTimeout(r, 30));
+      retries++;
+    }
+
+    const settledEvent = host.events.find((e) => e.type === 'arknights.roguelike_settled');
+    expect(settledEvent).toBeDefined();
+    expect(settledEvent?.text).toContain('【集成战略探索结束通知】');
+    expect(settledEvent?.text).toContain('主题「BlackFlow」探索已结束！');
+    expect(settledEvent?.text).toContain('已抵达第5层');
+
+    // 5. 探索结束后互斥锁释放，写操作恢复
+    const afterClick = receipt(await toolOf(world, 'ark_click').handler({ x: 0.5, y: 0.5 }, call));
+    expect(afterClick.text).not.toContain('【操作拦截】');
+
+    execSpy.mockRestore();
+    await world.stop();
+  });
+
+  it('ark_roguelike_select_recruit：局中招募触发 pending 事件、允许大模型点击选人并恢复后台托管', async () => {
+    writeFakeModel(scratchDir);
+    FakeTasker.entries = [
+      { text: '放弃本次招募', box: [500, 500, 100, 40] },
+      { text: '近卫', box: [200, 300, 100, 40] },
+      { text: '锏', box: [300, 400, 100, 40] },
+      { text: '确认招募', box: [900, 650, 120, 50] },
+    ];
+
+    const { world } = newWorld();
+    const host = new FakeHost();
+    await world.start(host);
+
+    await toolOf(world, 'ark_connect').handler({}, call);
+    await toolOf(world, 'ark_screencap').handler({}, call);
+
+    let resolveMock: any;
+    const resumeSpy = vi.fn().mockImplementation(() => {
+      resolveMock?.();
+    });
+    let triggerPending: any = null;
+
+    const execSpy = vi.spyOn(roguelikeExecutor, 'executeRoguelike').mockImplementation(async (opts) => {
+      opts.onWorkerReady?.({ resume: resumeSpy, kill: vi.fn() });
+      triggerPending = () => opts.onRecruitPending?.('Roguelike@RecruitMain');
+      await new Promise((r) => { resolveMock = r; setTimeout(r, 10000); });
+      return {
+        ok: true,
+        resultText: '招募后顺利通关',
+        logs: ['[MaaCore] 招募恢复'],
+        durationMs: 12000,
+      };
+    });
+
+    // 1. 启动探索
+    await toolOf(world, 'ark_run_roguelike').handler({ theme: '黑流树海', interactive_recruit: true }, call);
+    await new Promise((r) => setTimeout(r, 20));
+
+    // 2. 模拟底层遇到招募界面
+    triggerPending();
+
+    expect(host.events.some((e) => e.type === 'arknights.roguelike_recruit_prompt')).toBe(true);
+
+    // 3. 在招募 pending 状态下，ark_click 临时放行
+    const clickOutcome = receipt(await toolOf(world, 'ark_click').handler({ x: 0.5, y: 0.5 }, call));
+    expect(clickOutcome.text).not.toContain('【操作拦截】');
+
+    // 4. 调用 ark_roguelike_select_recruit 进行选券和挑人 (skip = true 跳过本次招募)
+    const recruitOutcome = receipt(await toolOf(world, 'ark_roguelike_select_recruit').handler({ skip: true }, call));
+    expect(recruitOutcome.failed).toBeUndefined();
+    expect(recruitOutcome.text).toContain('【招募跳过】');
+    expect(resumeSpy).toHaveBeenCalled();
+
+    execSpy.mockRestore();
+    await world.stop();
+  });
+
+  it('ark_run_roguelike：当底层任务失败 (ok: false) 时推送 battle_error 事件并安全释放操作锁', async () => {
+    const { world } = newWorld();
+    const host = new FakeHost();
+    await world.start(host);
+
+    await toolOf(world, 'ark_connect').handler({}, call);
+    await toolOf(world, 'ark_screencap').handler({}, call);
+
+    const failSpy = vi.spyOn(roguelikeExecutor, 'executeRoguelike').mockResolvedValue({
+      ok: false,
+      resultText: '添加 Roguelike 任务失败，请检查参数或当前游戏画面是否处于肉鸽页面。',
+      logs: ['[MaaCore] appendTask 返回非法 taskId: 0'],
+      durationMs: 300,
+    });
+
+    const startOutcome = receipt(await toolOf(world, 'ark_run_roguelike').handler({ theme: '黑流树海', mode: 2 }, call));
+    expect(startOutcome.failed).toBeUndefined();
+    expect(startOutcome.text).toContain('全权托管已在后台启动');
+
+    // 等待异步托管执行完毕
+    await new Promise((r) => setTimeout(r, 60));
+
+    // 验证推送了 arknights.battle_error 告警事件
+    const errorEvent = host.events.find((e) => e.type === 'arknights.battle_error');
+    expect(errorEvent).toBeDefined();
+    expect(errorEvent?.text).toContain('集成战略探索失败通知');
+
+    // 验证 isRoguelikeRunning 已安全解锁，后续 ark_click 不再被【操作拦截】
+    const clickOutcome = receipt(await toolOf(world, 'ark_click').handler({ x: 0.5, y: 0.5 }, call));
+    expect(clickOutcome.text).not.toContain('【操作拦截】');
+
+    failSpy.mockRestore();
+    await world.stop();
+  });
+
+  it('ark_roguelike_select_squad 与 ark_roguelike_select_node：分队与路线自主决策触发与执行', async () => {
+    const { world } = newWorld();
+    const host = new FakeHost();
+    await world.start(host);
+
+    await toolOf(world, 'ark_connect').handler({}, call);
+    await toolOf(world, 'ark_screencap').handler({}, call);
+
+    let triggerSquad: any = null;
+    let triggerNode: any = null;
+    const resumeSpy = vi.fn();
+
+    const execSpy = vi.spyOn(roguelikeExecutor, 'executeRoguelike').mockImplementation(async (options) => {
+      triggerSquad = () => options.onSquadPending?.('ChooseSquad');
+      triggerNode = () => options.onNodePending?.('Stages');
+      options.onWorkerReady?.({
+        resume: resumeSpy,
+        kill: vi.fn(),
+      });
+      return new Promise((resolve) => {
+        setTimeout(() => {
+          resolve({
+            ok: true,
+            resultText: '分队与路线自主决策后探索完成',
+            logs: ['[MaaCore] 探索完成'],
+            durationMs: 5000,
+          });
+        }, 10000);
+      });
+    });
+
+    await toolOf(world, 'ark_run_roguelike').handler({ theme: '黑流树海' }, call);
+    await new Promise((r) => setTimeout(r, 20));
+
+    // 1. 触发分队待定事件
+    triggerSquad();
+    expect(host.events.some((e) => e.type === 'arknights.roguelike_squad_prompt')).toBe(true);
+
+    // 2. 调用 ark_roguelike_select_squad
+    const squadOutcome = receipt(await toolOf(world, 'ark_roguelike_select_squad').handler({ slot: 1 }, call));
+    expect(squadOutcome.failed).toBeUndefined();
+    expect(squadOutcome.text).toContain('【肉鸽分队决策已执行】');
+    expect(resumeSpy).toHaveBeenCalledTimes(1);
+
+    // 3. 触发路线待定事件
+    triggerNode();
+    expect(host.events.some((e) => e.type === 'arknights.roguelike_node_prompt')).toBe(true);
+
+    // 4. 调用 ark_roguelike_select_node
+    const nodeOutcome = receipt(await toolOf(world, 'ark_roguelike_select_node').handler({ index: 1 }, call));
+    expect(nodeOutcome.failed).toBeUndefined();
+    expect(nodeOutcome.text).toContain('【肉鸽路线决策已执行】');
+    expect(resumeSpy).toHaveBeenCalledTimes(2);
+
+    execSpy.mockRestore();
+    await world.stop();
+  });
+
+  it('ark_stop_roguelike：紧急终止正在运行的肉鸽探索并立即交还控制权', async () => {
+    const { world } = newWorld();
+    const host = new FakeHost();
+    await world.start(host);
+
+    await toolOf(world, 'ark_connect').handler({}, call);
+    await toolOf(world, 'ark_screencap').handler({}, call);
+
+    const killSpy = vi.fn();
+
+    const execSpy = vi.spyOn(roguelikeExecutor, 'executeRoguelike').mockImplementation(async (options) => {
+      options.onWorkerReady?.({
+        resume: vi.fn(),
+        kill: killSpy,
+      });
+      return new Promise(() => {}); // 挂起模拟长效运行
+    });
+
+    await toolOf(world, 'ark_run_roguelike').handler({ theme: '黑流树海' }, call);
+    await new Promise((r) => setTimeout(r, 20));
+
+    // 探索期间，点击受拦截
+    const intercepted = receipt(await toolOf(world, 'ark_click').handler({ x: 0.5, y: 0.5 }, call));
+    expect(intercepted.failed).toBe(true);
+    expect(intercepted.text).toContain('【操作拦截】');
+
+    // 博士紧急停止
+    const stopOutcome = receipt(await toolOf(world, 'ark_stop_roguelike').handler({}, call));
+    expect(stopOutcome.failed).toBeUndefined();
+    expect(stopOutcome.text).toContain('【肉鸽已紧急停止】');
+    expect(killSpy).toHaveBeenCalled();
+
+    // 停止后，点击立即放行，控制权已归还
+    const normalClick = receipt(await toolOf(world, 'ark_click').handler({ x: 0.5, y: 0.5 }, call));
+    expect(normalClick.failed).toBeUndefined();
+    expect(normalClick.text).not.toContain('【操作拦截】');
+
+    execSpy.mockRestore();
+    await world.stop();
   });
 });

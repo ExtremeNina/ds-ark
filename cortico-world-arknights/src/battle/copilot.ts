@@ -25,6 +25,8 @@ export interface CopilotAction {
   costs?: number;
   kills?: number;
   delay?: number;
+  pre_delay?: number;
+  rear_delay?: number;
 }
 
 export interface CopilotPlan {
@@ -78,6 +80,8 @@ export function parseCopilotPlan(raw: unknown): { ok: true; plan: CopilotPlan } 
     if (typeof act.costs === 'number' && Number.isFinite(act.costs)) action.costs = act.costs;
     if (typeof act.kills === 'number' && Number.isFinite(act.kills)) action.kills = act.kills;
     if (typeof act.delay === 'number' && Number.isFinite(act.delay)) action.delay = act.delay;
+    if (typeof act.pre_delay === 'number' && Number.isFinite(act.pre_delay)) action.pre_delay = act.pre_delay;
+    if (typeof act.rear_delay === 'number' && Number.isFinite(act.rear_delay)) action.rear_delay = act.rear_delay;
 
     if (Array.isArray(act.location) && act.location.length >= 2) {
       const col = Number(act.location[0]);

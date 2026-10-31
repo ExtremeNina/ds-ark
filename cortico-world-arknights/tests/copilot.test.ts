@@ -27,6 +27,26 @@ describe('copilot 计划解析与校验', () => {
     expect(parseCopilotPlan({ stage_name: '2-10', actions: 'invalid' }).ok).toBe(false);
   });
 
+  it('正确解析 pre_delay 与 rear_delay 字段', () => {
+    const raw = {
+      stage_name: '1-7',
+      actions: [
+        { type: 'SpeedUp' },
+        { type: 'Deploy', name: '凛御银灰', location: [1, 3], direction: 'Right', costs: 12 },
+        { type: 'Skill', name: '凛御银灰', location: [1, 3], pre_delay: 5000 },
+        { type: 'Deploy', name: '娜仁图亚', location: [1, 2], direction: 'Right', costs: 19 },
+        { type: 'Skill', name: '娜仁图亚', location: [1, 2], pre_delay: 3000, rear_delay: 1000 },
+      ],
+    };
+    const parsed = parseCopilotPlan(raw);
+    expect(parsed.ok).toBe(true);
+    if (parsed.ok) {
+      expect(parsed.plan.actions[2]!.pre_delay).toBe(5000);
+      expect(parsed.plan.actions[4]!.pre_delay).toBe(3000);
+      expect(parsed.plan.actions[4]!.rear_delay).toBe(1000);
+    }
+  });
+
   it('方向标准化', () => {
     expect(normalizeDirection('Up')).toBe('up');
     expect(normalizeDirection('上')).toBe('up');

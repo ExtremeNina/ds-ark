@@ -8,6 +8,22 @@ import koffi from 'koffi';
 
 export type AsstMsgCallback = (msg: number, details: string) => void;
 
+/**
+ * MaaCore Win32 控制器输入与截图模式枚举掩码 (对应 AsstCaller.h)
+ */
+export const MAA_WIN32_INPUT = {
+  Seize: 1n,
+  SendMessage: 2n,
+  PostMessage: 4n,
+  SendMessageWithCursorPos: 32n,
+} as const;
+
+export const MAA_WIN32_SCREENCAP = {
+  GDI: 2n,
+  DXGI: 16n,
+  DXGI_OR_GDI: 18n,
+} as const;
+
 export interface MaaCoreLib {
   readonly version: string;
   create(callback?: AsstMsgCallback): unknown;
@@ -27,6 +43,16 @@ export interface MaaCoreLib {
   start(handle: unknown): boolean;
   stop(handle: unknown): boolean;
   running(handle: unknown): boolean;
+}
+
+export function normalizeMaaResourceDir(dir: string): string {
+  if (!dir) return dir;
+  let cleaned = dir.trim().replace(/\\/g, '/').replace(/\/+$/, '');
+  if (cleaned.toLowerCase().endsWith('/resource')) {
+    const parent = cleaned.slice(0, cleaned.length - '/resource'.length);
+    if (parent) return parent;
+  }
+  return cleaned;
 }
 
 const COMMON_MAA_DIRS = [
@@ -106,7 +132,7 @@ export function loadMaaCoreLib(maaDirInput?: string): MaaCoreLib | null {
     const version = typeof AsstGetVersion === 'function' ? String(AsstGetVersion()) : 'unknown';
 
     // 全局预加载主资源
-    AsstLoadResource(maaDir);
+    AsstLoadResource(normalizeMaaResourceDir(maaDir));
 
     const registeredCallbacks = new Map<unknown, any>();
 
@@ -154,12 +180,12 @@ export function loadMaaCoreLib(maaDirInput?: string): MaaCoreLib | null {
         }
       },
       loadResource(dir) {
-        return AsstLoadResource(dir);
+        return AsstLoadResource(normalizeMaaResourceDir(dir));
       },
       setUserDir(userDir) {
         return AsstSetUserDir(userDir);
       },
-      attachWindow(handle, hwnd, screencap = 18n, mouse = 2n, keyboard = 2n) {
+      attachWindow(handle, hwnd, screencap = MAA_WIN32_SCREENCAP.DXGI_OR_GDI, mouse = MAA_WIN32_INPUT.SendMessageWithCursorPos, keyboard = MAA_WIN32_INPUT.SendMessage) {
         if (!handle) return false;
         try {
           const hwndPtr = typeof hwnd === 'bigint' ? hwnd : BigInt(hwnd);

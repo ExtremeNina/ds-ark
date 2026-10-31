@@ -66,7 +66,7 @@ export const PRESET_COPILOT_PLANS: Record<string, CopilotPlan> = {
     stage_name: '1-7',
     doc: {
       title: '1-7 低配速刷',
-      details: '任意先锋 + 单狙 + 群狙/术师即可通关。',
+      details: '先锋地面阻挡 + 高台单狙输出。',
     },
     opers: [
       { name: '芬' },
@@ -75,7 +75,7 @@ export const PRESET_COPILOT_PLANS: Record<string, CopilotPlan> = {
     actions: [
       { type: 'SpeedUp' },
       { type: 'Deploy', name: '芬', location: [4, 3], direction: 'Right', costs: 9 },
-      { type: 'Deploy', name: '克洛丝', location: [3, 2], direction: 'Right', costs: 10 },
+      { type: 'Deploy', name: '克洛丝', location: [3, 1], direction: 'Right', costs: 10 },
     ],
   },
   '2-10': {

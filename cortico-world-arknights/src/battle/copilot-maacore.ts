@@ -1,11 +1,17 @@
 /**
  * 基于经典 MaaCore.dll (Asst.h) 的原生战斗全权托管驱动：
  * 负责将 CopilotPlan 交付给 MAA 官方原版 C-API 执行。
+ *
+ * 现已支持【子进程安全隔离模式】：
+ * 将外部动态库加载与原生调用移入独立 Node 子进程中执行，彻底杜绝主进程环境变量污染与
+ * 0xC0000374 / 0xC0000005 堆损坏/访问违规对桌宠宿主进程的崩溃影响。
  */
+import { fork } from 'node:child_process';
 import { existsSync, unlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { findMaaCoreDir, loadMaaCoreLib, type MaaCoreLib } from '../mfw/asst-ffi.ts';
+import { fileURLToPath } from 'node:url';
+import { findMaaCoreDir, loadMaaCoreLib, type MaaCoreLib, MAA_WIN32_INPUT, MAA_WIN32_SCREENCAP } from '../mfw/asst-ffi.ts';
 import type { CopilotPlan } from './copilot.ts';
 
 export function isMaaCoreBattleSupported(
@@ -33,9 +39,132 @@ export interface MaaCoreCopilotOutcome {
 }
 
 /**
- * 将 CopilotPlan 转交给 MaaCore 原生引擎全权托管执行
+ * 统一执行入口：
+ * - 当测试注入 mock lib 时，走进程内直接执行（保持测试高效且无需子进程）；
+ * - 生产环境中无 injectedLib 时，一律走独立的子进程 Worker 隔离运行。
  */
 export async function runMaaCoreCopilot(options: MaaCoreCopilotOptions): Promise<MaaCoreCopilotOutcome> {
+  if (options.lib !== undefined && options.lib !== null) {
+    return runMaaCoreCopilotDirect(options);
+  }
+  return runMaaCoreCopilotSubprocess(options);
+}
+
+/**
+ * 子进程安全隔离执行器：
+ * 调起 copilot-worker.ts，主进程通过 IPC 收集日志与战果，实现崩溃免疫。
+ */
+export async function runMaaCoreCopilotSubprocess(options: MaaCoreCopilotOptions): Promise<MaaCoreCopilotOutcome> {
+  const { plan, hwnd, maaResourceDir, maxSeconds = 180, info } = options;
+  const logs: string[] = [];
+  const startTime = Date.now();
+
+  const workerPath = fileURLToPath(new URL('./copilot-worker.ts', import.meta.url));
+
+  return new Promise((resolve) => {
+    let settled = false;
+    let finalOutcome: MaaCoreCopilotOutcome | null = null;
+
+    const env = {
+      ...process.env,
+      ELECTRON_RUN_AS_NODE: '1',
+    };
+
+    let child: ReturnType<typeof fork>;
+    try {
+      child = fork(workerPath, [], {
+        env,
+        execArgv: ['--experimental-strip-types'],
+        stdio: ['pipe', 'pipe', 'pipe', 'ipc'],
+      });
+    } catch (e) {
+      resolve({
+        ok: false,
+        resultText: `无法启动 MaaCore 子进程: ${String(e)}`,
+        logs: [`启动子进程异常: ${String(e)}`],
+        durationMs: Date.now() - startTime,
+      });
+      return;
+    }
+
+    const timer = setTimeout(() => {
+      if (!settled) {
+        settled = true;
+        try { child.kill('SIGKILL'); } catch {}
+        logs.push(`MaaCore 子进程超过最大时限（${maxSeconds}秒），已强制终止。`);
+        resolve({
+          ok: false,
+          resultText: '战斗超时已强制终止',
+          logs,
+          durationMs: Date.now() - startTime,
+        });
+      }
+    }, (maxSeconds + 5) * 1000);
+
+    child.on('message', (msg: any) => {
+      if (!msg || typeof msg !== 'object') return;
+      if (msg.type === 'log') {
+        logs.push(msg.message);
+      } else if (msg.type === 'info') {
+        if (info) info(msg.message);
+      } else if (msg.type === 'done') {
+        finalOutcome = {
+          ok: msg.ok,
+          resultText: msg.resultText,
+          logs: msg.logs || logs,
+          durationMs: msg.durationMs || (Date.now() - startTime),
+        };
+      }
+    });
+
+    child.on('error', (err: any) => {
+      logs.push(`MaaCore 子进程通信错误: ${String(err)}`);
+    });
+
+    child.on('exit', (code: number | null, signal: string | null) => {
+      clearTimeout(timer);
+      if (settled) return;
+      settled = true;
+
+      const durationMs = Date.now() - startTime;
+      if (finalOutcome) {
+        resolve(finalOutcome);
+        return;
+      }
+
+      const unsignedCode = code !== null ? (code >>> 0) : null;
+      const hexCode = unsignedCode !== null ? '0x' + unsignedCode.toString(16).toUpperCase() : 'null';
+      const isCrash = unsignedCode === 0xC0000374 || unsignedCode === 0xC0000005;
+
+      let crashDetail = `子进程退出 (代码: ${code} / ${hexCode}, 信号: ${signal || 'none'})`;
+      if (isCrash) {
+        crashDetail = `【安全保护】MaaCore 原生底层发生致命异常 [${hexCode}]（已由子进程安全隔离拦截，桌宠未受任何波及）。`;
+      }
+      logs.push(crashDetail);
+
+      resolve({
+        ok: false,
+        resultText: isCrash ? 'MaaCore 底层异常（已安全隔离拦截）' : 'MaaCore 子进程异常结束',
+        logs,
+        durationMs,
+      });
+    });
+
+    // 序列化传递参数
+    const hwndStr = hwnd !== undefined && hwnd !== null ? String(hwnd) : null;
+    child.send({
+      plan,
+      hwnd: hwndStr,
+      maaResourceDir,
+      maxSeconds,
+    });
+  });
+}
+
+/**
+ * 进程内直接执行（单测 Mock 注入场景）
+ */
+export async function runMaaCoreCopilotDirect(options: MaaCoreCopilotOptions): Promise<MaaCoreCopilotOutcome> {
   const { plan, hwnd, maaResourceDir, maxSeconds = 180, info, lib: injectedLib } = options;
   const logs: string[] = [];
   const startTime = Date.now();
@@ -53,7 +182,6 @@ export async function runMaaCoreCopilot(options: MaaCoreCopilotOptions): Promise
   logs.push(`【执行引擎：MaaCore 原生全权托管 (v${lib.version})】已直连官方原生引擎`);
   if (info) info(`MaaCore 启动战斗托管：关卡 ${plan.stage_name}，核心版本 ${lib.version}`);
 
-  // 1. 将 plan 写入系统临时 JSON 文件供 MaaCore 读取
   const tempFile = join(tmpdir(), `maa_copilot_${Date.now()}_${Math.random().toString(36).slice(2, 8)}.json`);
   try {
     writeFileSync(tempFile, JSON.stringify(plan, null, 2), 'utf8');
@@ -66,9 +194,9 @@ export async function runMaaCoreCopilot(options: MaaCoreCopilotOptions): Promise
     };
   }
 
-  // 2. 创建 Asst 实例与回调
   let taskSuccess = false;
   let taskFailed = false;
+  let resolutionError = false;
   let handle: unknown = null;
 
   try {
@@ -77,10 +205,21 @@ export async function runMaaCoreCopilot(options: MaaCoreCopilotOptions): Promise
         const parsed = details ? JSON.parse(details) : {};
         const detailStr = typeof parsed === 'object' ? JSON.stringify(parsed) : String(details);
         logs.push(`[MaaCore Msg ${msg}] ${detailStr.slice(0, 100)}`);
-        if (details.includes('Failed') || details.includes('failed')) {
+        if (details.includes('UnsupportedResolution') || details.includes('Not 16:9')) {
+          resolutionError = true;
           taskFailed = true;
+        } else if (msg === 10000) {
+          // 根任务链错误 (TaskChainError=10000)
+          taskFailed = true;
+        } else if (msg === 10002 || msg === 3) {
+          // 任务链正常完成 (TaskChainCompleted=10002) 或全部任务完成 (AllTasksCompleted=3)
+          taskSuccess = true;
         } else if (details.includes('Accomplished') || details.includes('Completed') || details.includes('success')) {
           taskSuccess = true;
+        } else if (details.includes('Failed') || details.includes('failed')) {
+          if (!details.includes('BattleStartPre')) {
+            taskFailed = true;
+          }
         }
       } catch {
         logs.push(`[MaaCore Msg ${msg}] ${details.slice(0, 80)}`);
@@ -107,14 +246,19 @@ export async function runMaaCoreCopilot(options: MaaCoreCopilotOptions): Promise
   }
 
   try {
-    // 3. 挂载窗口句柄
     if (hwnd) {
       try {
         const hwndVal = typeof hwnd === 'bigint' ? hwnd : BigInt(hwnd);
-        const attached = lib.attachWindow(handle, hwndVal);
-        logs.push(`挂载明日方舟窗口句柄 (${String(hwnd)})：${attached ? '成功' : '失败'}`);
+        const attached = lib.attachWindow(
+          handle,
+          hwndVal,
+          MAA_WIN32_SCREENCAP.DXGI_OR_GDI,
+          MAA_WIN32_INPUT.SendMessageWithCursorPos,
+          MAA_WIN32_INPUT.SendMessage,
+        );
+        logs.push(`挂载明日方舟窗口句柄 (${String(hwnd)})：${attached ? '成功' : '失败'}（模式：DXGI+GDI / SendMessageWithCursorPos）`);
         if (!attached) {
-          throw new Error(`AsstAttachWindow 挂载窗口失败（句柄: ${String(hwnd)}）`);
+          throw new Error(`AsstAttachWindow 挂载窗口失败（句柄: ${String(hwnd)}）${resolutionError ? '：窗口分辨率不是 16:9' : ''}`);
         }
       } catch (e) {
         logs.push(`挂载窗口句柄异常：${String(e)}`);
@@ -122,7 +266,6 @@ export async function runMaaCoreCopilot(options: MaaCoreCopilotOptions): Promise
       }
     }
 
-    // 4. 追加 Copilot 任务并启动
     const taskId = lib.appendTask(handle, 'Copilot', {
       filename: tempFile,
       formation: false,
@@ -136,7 +279,6 @@ export async function runMaaCoreCopilot(options: MaaCoreCopilotOptions): Promise
 
     logs.push('MaaCore 战斗任务已开始运行，等待战场结算...');
 
-    // 5. 轮询运行状态
     const pollStart = Date.now();
     while (Date.now() - pollStart < maxSeconds * 1000) {
       await new Promise((r) => setTimeout(r, 1000));
@@ -162,7 +304,10 @@ export async function runMaaCoreCopilot(options: MaaCoreCopilotOptions): Promise
 
   const durationMs = Date.now() - startTime;
   const ok = taskSuccess && !taskFailed;
-  const resultText = ok ? '作战胜利（行动结束）' : '作战失败或已中断';
+  let resultText = ok ? '作战胜利（行动结束）' : '作战失败或已中断';
+  if (!ok && resolutionError) {
+    resultText = '窗口分辨率非 16:9，MaaCore 拒绝挂载';
+  }
 
   logs.push(`MaaCore 战斗执行完毕，耗时 ${(durationMs / 1000).toFixed(1)} 秒，最终结果：${resultText}。`);
 

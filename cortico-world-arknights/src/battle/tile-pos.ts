@@ -19,9 +19,166 @@ export interface MapDimension {
   readonly height: number;
 }
 
+export interface TileRawData {
+  readonly buildableType: number; // 0=forbidden, 1=melee(地面), 2=ranged(高台)
+  readonly heightType: number;
+  readonly isEnd: boolean; // 我方保护点（蓝门）
+  readonly isStart: boolean; // 敌方生成点（红门）
+  readonly tileKey: string;
+}
+
+export interface StageMapInfo {
+  readonly code: string;
+  readonly name: string;
+  readonly stageId: string;
+  readonly width: number;
+  readonly height: number;
+  /** ASCII 纯文本战术地图 */
+  readonly asciiGrid: string;
+  /** 所有地面地块坐标列表 [col, row]，可部署先锋/近卫/重装 */
+  readonly meleeTiles: readonly [number, number][];
+  /** 所有高台地块坐标列表 [col, row]，可部署狙击/术师/医疗/辅助 */
+  readonly rangedTiles: readonly [number, number][];
+  /** 敌方红门出生点 [col, row] */
+  readonly startTiles: readonly [number, number][];
+  /** 我方蓝门保护点 [col, row] */
+  readonly endTiles: readonly [number, number][];
+  /** 原始地块二维矩阵 tiles[row][col] */
+  readonly tiles: readonly (readonly TileRawData[])[];
+}
+
+/** 寻找 Arknights-Tile-Pos 目录候选 */
+export function resolveTilePosDir(resourceDir?: string): string | null {
+  const candidates: string[] = [];
+  if (resourceDir) {
+    candidates.push(join(resourceDir, 'Arknights-Tile-Pos'), resourceDir);
+  }
+  candidates.push(
+    'D:/soft/MAA-v6/resource/Arknights-Tile-Pos',
+    join(process.cwd(), 'assets/resource/Arknights-Tile-Pos'),
+    join(process.cwd(), 'resource/Arknights-Tile-Pos'),
+  );
+
+  for (const dir of candidates) {
+    if (existsSync(join(dir, 'overview.json'))) {
+      return dir;
+    }
+  }
+  return null;
+}
+
+interface OverviewEntry {
+  code: string;
+  name: string;
+  stageId: string;
+  filename: string;
+  width: number;
+  height: number;
+}
+
+/**
+ * 从 MAA 静态资源加载关卡地图网格情报
+ */
+export function loadStageMapInfo(stageCode: string, resourceDir?: string): StageMapInfo | null {
+  const dir = resolveTilePosDir(resourceDir);
+  if (!dir) return null;
+
+  const normalizedCode = stageCode.trim().toUpperCase();
+  const overviewPath = join(dir, 'overview.json');
+  if (!existsSync(overviewPath)) return null;
+
+  try {
+    const raw = readFileSync(overviewPath, 'utf8');
+    const overview = JSON.parse(raw) as Record<string, OverviewEntry>;
+
+    let matchedEntry: OverviewEntry | null = null;
+    for (const [key, entry] of Object.entries(overview)) {
+      if (entry.code && entry.code.toUpperCase() === normalizedCode) {
+        // 优先选用普通主线版本（排除 #f# 突袭标记文件）
+        if (!key.includes('#f#')) {
+          matchedEntry = entry;
+          break;
+        }
+        if (!matchedEntry) {
+          matchedEntry = entry;
+        }
+      }
+    }
+
+    if (!matchedEntry) return null;
+
+    const mapFilePath = join(dir, matchedEntry.filename);
+    if (!existsSync(mapFilePath)) return null;
+
+    const mapRaw = readFileSync(mapFilePath, 'utf8');
+    const mapData = JSON.parse(mapRaw) as {
+      code: string;
+      name: string;
+      stageId: string;
+      tiles: TileRawData[][];
+    };
+
+    const tiles = mapData.tiles;
+    const height = tiles.length;
+    const width = height > 0 ? tiles[0]!.length : 0;
+
+    const meleeTiles: [number, number][] = [];
+    const rangedTiles: [number, number][] = [];
+    const startTiles: [number, number][] = [];
+    const endTiles: [number, number][] = [];
+
+    const lines: string[] = [];
+    // 头部列标
+    const colHeader = '     ' + Array.from({ length: width }, (_, i) => i.toString().padStart(2, '0')).join(' ');
+    lines.push(colHeader);
+    lines.push('     ' + Array.from({ length: width }, () => '--').join(' '));
+
+    for (let r = 0; r < height; r++) {
+      const rowTiles = tiles[r]!;
+      const rowSymbols: string[] = [];
+      for (let c = 0; c < width; c++) {
+        const t = rowTiles[c]!;
+        if (t.isStart) startTiles.push([c, r]);
+        if (t.isEnd) endTiles.push([c, r]);
+
+        if (t.isStart) {
+          rowSymbols.push(' S'); // 敌方红门
+        } else if (t.isEnd) {
+          rowSymbols.push(' E'); // 我方蓝门
+        } else if (t.buildableType === 2) {
+          rangedTiles.push([c, r]);
+          rowSymbols.push(' R'); // 高台 (Ranged)
+        } else if (t.buildableType === 1) {
+          meleeTiles.push([c, r]);
+          rowSymbols.push(' M'); // 地面 (Melee)
+        } else {
+          rowSymbols.push(' .'); // 障碍/禁区
+        }
+      }
+      lines.push(`R${r.toString().padStart(2, '0')}: ` + rowSymbols.join(' '));
+    }
+
+    return {
+      code: mapData.code || matchedEntry.code,
+      name: mapData.name || matchedEntry.name,
+      stageId: mapData.stageId || matchedEntry.stageId,
+      width,
+      height,
+      asciiGrid: lines.join('\n'),
+      meleeTiles,
+      rangedTiles,
+      startTiles,
+      endTiles,
+      tiles,
+    };
+  } catch {
+    return null;
+  }
+}
+
 /** 常见关卡的内置棋盘尺寸兜底（宽/列数，高/行数） */
 export const STAGE_DIMENSIONS: Record<string, MapDimension> = {
-  '1-7': { width: 10, height: 7 },
+  '1-7': { width: 11, height: 7 },
   '2-10': { width: 11, height: 8 },
   '0-1': { width: 9, height: 6 },
   'PR-A-1': { width: 10, height: 7 },
