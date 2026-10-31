@@ -5,3 +5,9 @@ debug/
 .codebuddy/
 .DS_Store
 Thumbs.db
+
+# 个人数据与阶段性设计草稿（不推送到远程仓库）
+Agent.md
+Arknights_OperBox_Export.json
+*MVP*.md
+*最小可行性产品*.md
